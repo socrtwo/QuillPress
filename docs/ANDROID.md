@@ -143,11 +143,11 @@ The `.aab` is for Google Play only; it cannot be installed directly.
 
 - **Open / Save As** use the system file picker (Storage Access Framework), so files in Drive,
   Dropbox, SD cards, etc. work and no storage permission is needed. Ctrl+S writes back to the same
-  presentation via a persisted URI permission.
+  publication via a persisted URI permission.
 - **Open with QuillPress** (`ACTION_VIEW`) for `.pptx`, `.pptm`, `.ppsx`, `.ppsm`, `.potx`, `.potm`, `.ppt`, `.pps`, `.pot`,
   `.odp`, `.otp`, `.fodp`, `.sxi`, `.md`, `.qsp` and `.qspe`. Files are matched by MIME type
-  (`…presentationml.presentation`, `…presentationml.slideshow`, `…presentationml.template`, `application/vnd.ms-powerpoint`,
-  `…opendocument.presentation`, `text/markdown`, `application/x-quillpress`) and, for providers that report a generic type, by extension.
+  (`…publicationml.publication`, `…publicationml.pageshow`, `…publicationml.template`, `application/vnd.ms-powerpoint`,
+  `…opendocument.publication`, `text/markdown`, `application/x-quillpress`) and, for providers that report a generic type, by extension.
 - **Share to QuillPress** (`ACTION_SEND`) for the same types. Text shared without a file arrives
   as a `.txt` file and opens through the text import.
 - **Print** goes through Android's print service, which also offers *Save as PDF*.
@@ -179,12 +179,12 @@ Notes:
   the returned `uri` keeps working for `writeUri` / `readUri` after restarts. URIs from "Open with" may
   be read-only or temporary; if `writeUri` rejects, fall back to `saveAs`.
 - Writes use mode `"wt"` (truncate), falling back to `"w"` for providers that do not support it.
-- File I/O runs on a background thread; very large presentations are limited by memory (files over the plugin's size limit are refused) because they are
+- File I/O runs on a background thread; very large publications are limited by memory (files over the plugin's size limit are refused) because they are
   passed to the WebView as one base64 string.
 
 ## App icon
 
-The launcher icon is the Quill suite icon for this app: a white presentation screen with a bar chart and a white quill on a
+The launcher icon is the Quill suite icon for this app: a white publication screen with a bar chart and a white quill on a
 green tile. Its sources are `resources/icon.svg` (the full tile), `resources/icon-foreground.svg` (the
 adaptive-icon foreground, artwork inside the safe zone) and `resources/icon-background.txt` (the
 adaptive background color, `#1E7A46`). `node scripts/gen-android-icons.mjs` writes from them:

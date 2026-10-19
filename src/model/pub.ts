@@ -269,6 +269,9 @@ export class Pub {
 
   clearHistory(): void { this.undoStack = []; this.redoStack = []; }
 
+  /** Notifies listeners of a change made outside a transaction (not undoable). */
+  changed(): void { this.version++; this.onChange?.(); }
+
   // ------------------------------------------------------------------------------------------
   // Serialization
 

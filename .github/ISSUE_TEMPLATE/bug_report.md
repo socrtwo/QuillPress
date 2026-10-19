@@ -21,7 +21,7 @@ A clear description of the problem.
 - Platform: Android / iOS / iPadOS / Windows / macOS / Linux / Raspberry Pi / ChromeOS / Web
 - OS version and device or browser:
 
-**File (if the problem involves a presentation)**
+**File (if the problem involves a publication)**
 - Format: .pptx / .pptm / .ppsx / .potx / .ppt / .odp / .md / .qsp / other
 - Program that created it:
 - Was it damaged? If recovery ran, paste the Recovery Report (File ▸ Recovery Report).

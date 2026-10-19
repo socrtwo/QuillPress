@@ -282,6 +282,8 @@ export interface Page {
   id: string;
   master: string;
   items: Item[];
+  /** A name shown in the Pages pane and Navigator (optional). */
+  name?: string;
   /** Section-aware label ("iv", "12") recomputed on change; stored for exports. */
   label?: string;
   guides?: Guide[];

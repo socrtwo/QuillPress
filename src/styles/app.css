@@ -366,7 +366,7 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, "Cousine", 
   .ql-status-view:not(.ql-on) { display: none; }
   .ql-shortcuts td:nth-child(2) { white-space: normal; overflow-wrap: anywhere; }
 }
-/* Short windows (phones in landscape): an icon-only ribbon leaves the slide room to work in. Labels remain in the tooltips, the command search and the Customize dialogs. */
+/* Short windows (phones in landscape): an icon-only ribbon leaves the page room to work in. Labels remain in the tooltips, the command search and the Customize dialogs. */
 @media (max-height: 500px) {
   .ql-titlebar { min-height: calc(40px * var(--ql-ui-scale)); }
   .ql-tab { padding-top: 6px; padding-bottom: 5px; }

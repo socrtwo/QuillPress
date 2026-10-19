@@ -34,6 +34,8 @@ export interface TabView {
   readonly zoom: number;
   /** Scrolls the current page into view. */
   showPage(id: string): void;
+  /** Arms a drag-to-create tool on the canvas (null cancels). */
+  setTool(t: any): void;
 }
 
 export class PubTab {

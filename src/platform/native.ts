@@ -292,25 +292,23 @@ export async function onBackButton(cb: () => boolean): Promise<void> {
   App.addListener('backButton', () => { if (!cb()) App.minimizeApp(); });
 }
 
-export const OPEN_ACCEPT = '.pptx,.pptm,.ppsx,.ppsm,.potx,.potm,.ppt,.pps,.pot,.odp,.otp,.fodp,.sxi,.sti,.md,.markdown,.txt,.qsp,.qspe,.json,.xml,.html,.htm'
-  // outlines and documents whose headings become slides
-  + ',.docx,.odt,.rtf';
+export const OPEN_ACCEPT = '.qpp,.qppe,.sla,.json,.svg,.txt,.md,.markdown,.rtf,.docx,.html,.htm'
+  // pictures open as a one-page publication
+  + ',.png,.jpg,.jpeg,.gif,.webp,.bmp,.tif,.tiff';
 export const OPEN_MIMES = [
-  'application/x-quillpress', 'application/x-quillpress-encrypted',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  'application/vnd.ms-powerpoint.presentation.macroEnabled.12',
-  'application/vnd.openxmlformats-officedocument.presentationml.slideshow',
-  'application/vnd.openxmlformats-officedocument.presentationml.template',
-  'application/vnd.ms-powerpoint', 'application/vnd.oasis.opendocument.presentation', 'application/vnd.oasis.opendocument.flat-presentation',
-  'application/vnd.sun.xml.impress', 'text/markdown', 'text/plain', 'text/html', 'application/xml', 'text/xml', 'application/json', 'application/octet-stream', '*/*',
+  'application/x-quillpress', 'application/x-quillpress-encrypted', 'application/x-scribus',
+  'application/json', 'image/svg+xml', 'text/markdown', 'text/plain', 'text/html', 'application/rtf', 'text/rtf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff', 'application/xml', 'text/xml', 'application/octet-stream', '*/*',
 ];
 
 // ------------------------------------------------------------------------------------------
 // Sibling Quill apps
 
-export type QuillApp = 'QuillPen' | 'QuillPost' | 'QuillGrid';
+export type QuillApp = 'QuillPen' | 'QuillPost' | 'QuillGrid' | 'QuillStage' | 'QuillLoom' | 'QuillFolio';
 export const QUILL_APP_IDS: Record<QuillApp, string> = {
   QuillPen: 'io.github.socrtwo.quillpen', QuillPost: 'io.github.socrtwo.quillpost', QuillGrid: 'io.github.socrtwo.quillgrid',
+  QuillStage: 'io.github.socrtwo.quillstage', QuillLoom: 'io.github.socrtwo.quillloom', QuillFolio: 'io.github.socrtwo.quillfolio',
 };
 
 /**

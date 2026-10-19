@@ -39,8 +39,8 @@ const RECOMMEND_ORDER: Record<string, string[]> = {
   xml: ['xmltrncatorfixr'],
 };
 
-/** File kinds QuillPress itself opens. */
-export const HANDLED_HERE = ['pptx', 'ooxml', 'ppt', 'odp', 'ole', 'xml', 'txt', 'docx', 'rtf'];
+/** File kinds QuillPress itself opens or places. */
+export const HANDLED_HERE = ['qpp', 'sla', 'json', 'xml', 'txt', 'docx', 'rtf', 'html', 'png', 'jpg', 'gif', 'bmp', 'tif', 'webp', 'zip', 'svg'];
 
 export const DESCRIPTIONS: Record<string, string> = {
   docx: 'Microsoft Word document (DOCX, Office Open XML)', xlsx: 'Microsoft Excel workbook (XLSX)', pptx: 'Microsoft PowerPoint presentation (PPTX)',
@@ -52,12 +52,12 @@ export const DESCRIPTIONS: Record<string, string> = {
   rtf: 'Rich Text Format document (RTF)', '7z': '7-Zip archive', rar: 'RAR archive', gz: 'GZIP compressed data', xml: 'XML document',
   html: 'HTML document', sqlite: 'SQLite database', pst: 'Outlook data file (PST/OST)', wav: 'WAV audio', avi: 'AVI video', webp: 'WebP image',
   ogg: 'OGG media', flac: 'FLAC audio', mp3: 'MP3 audio', mp4: 'MP4 / QuickTime media', exe: 'Windows executable (EXE/DLL)',
-  txt: 'Plain text', csv: 'Comma-separated values (CSV)', bin: 'Unrecognized binary data',
+  txt: 'Plain text', csv: 'Comma-separated values (CSV)', bin: 'Unrecognized binary data', qpp: 'QuillPress publication (QPP)', sla: 'Scribus document (SLA)', json: 'JSON data', svg: 'SVG drawing',
 };
 
 export const MIME: Record<string, string> = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', doc: 'application/msword', xls: 'application/vnd.ms-excel',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', doc: 'application/msword', xls: 'application/vnd.ms-excel', qpp: 'application/x-quillpress', sla: 'application/x-scribus', json: 'application/json', svg: 'image/svg+xml',
   ppt: 'application/vnd.ms-powerpoint', pdf: 'application/pdf', png: 'image/png', gif: 'image/gif', jpg: 'image/jpeg', zip: 'application/zip',
   xml: 'application/xml', txt: 'text/plain', html: 'text/html', odt: 'application/vnd.oasis.opendocument.text', rtf: 'application/rtf',
 };
@@ -96,6 +96,7 @@ const SIG = {
 
 function refineZip(b: Uint8Array, start: number, end: number): string {
   const has = (s: string) => indexOfBytes(b, ascii(s), start, end) !== -1;
+  if (has('mimetypeapplication/x-quillpress') || has('publication.json')) return 'qpp';
   if (has('mimetypeapplication/vnd.oasis.opendocument.text')) return 'odt';
   if (has('mimetypeapplication/vnd.oasis.opendocument.spreadsheet')) return 'ods';
   if (has('mimetypeapplication/vnd.oasis.opendocument.presentation')) return 'odp';
@@ -191,13 +192,16 @@ export function identifyAt(b: Uint8Array, start = 0, end = b.length): Identifica
   if (matches(b, start + 4, ascii('ftyp'))) return res('mp4');
   if (b[start] === 0x4d && b[start + 1] === 0x5a) return res('exe', 'medium');
   if (b[start] === 0x42 && b[start + 1] === 0x4d && start === 0) return res('bmp', 'medium');
-  if (matches(b, start, SIG.XMLDECL)) return res('xml');
-  if (looksLikeText(b, start, end)) {
+  if (looksLikeText(b, start, end) || matches(b, start, SIG.XMLDECL)) {
     let head = '';
     for (let i = start; i < Math.min(end, start + 512); i++) head += String.fromCharCode(b[i]);
     const lower = head.toLowerCase();
     if (lower.includes('<!doctype html') || lower.includes('<html')) return res('html');
-    if (lower.includes('<?xml') || /^\s*</.test(head)) return res('xml', 'medium');
+    if (lower.includes('<scribusutf8new') || lower.includes('<scribus')) return res('sla');
+    if (lower.includes('<svg')) return res('svg');
+    if (lower.includes('<?xml')) return res('xml');
+    if (/^\s*</.test(head)) return res('xml', 'medium');
+    if (/^\s*\{/.test(head) && lower.includes('"format"')) return res('json', 'medium');
     return res('txt', 'medium');
   }
   return res('bin', 'low');
@@ -269,7 +273,7 @@ export function analyze(bytes: Uint8Array, fileName = 'recovered-file'): FileIdR
     else { seg.recommended = recommend(seg.ext); foreign.push(seg); }
   }
   // Prefer a document segment over loose text or XML that happens to precede it.
-  const docKinds = ['docx', 'ooxml', 'doc', 'odt', 'rtf', 'epub', 'ole'];
+  const docKinds = ['qpp', 'sla', 'json', 'docx', 'rtf', 'html'];
   const proceed = matching.find((m) => docKinds.includes(m.ext)) || matching[0] || segments[0];
   if (proceed && matching[0] !== proceed) { matching.splice(matching.indexOf(proceed), 1); matching.unshift(proceed); }
   return {

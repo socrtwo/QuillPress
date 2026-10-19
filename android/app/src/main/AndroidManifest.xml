@@ -24,32 +24,35 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- "Open with QuillPress" for presentations identified by MIME type
+            <!-- "Open with QuillPress" for publications, text and pictures identified by MIME type
                  (a mimeType-only <data> matches content: and file: URIs). -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <action android:name="android.intent.action.EDIT" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation" />
-                <data android:mimeType="application/vnd.ms-powerpoint.presentation.macroEnabled.12" />
-                <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.slideshow" />
-                <data android:mimeType="application/vnd.ms-powerpoint.slideshow.macroEnabled.12" />
-                <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.template" />
-                <data android:mimeType="application/vnd.ms-powerpoint" />
-                <data android:mimeType="application/vnd.oasis.opendocument.presentation" />
-                <data android:mimeType="application/vnd.oasis.opendocument.presentation-template" />
-                <data android:mimeType="application/vnd.oasis.opendocument.flat-presentation" />
-                <data android:mimeType="application/vnd.sun.xml.impress" />
-                <data android:mimeType="text/markdown" />
-                <data android:mimeType="text/plain" />
                 <data android:mimeType="application/x-quillpress" />
                 <data android:mimeType="application/x-quillpress-encrypted" />
+                <data android:mimeType="application/x-scribus" />
+                <data android:mimeType="application/json" />
+                <data android:mimeType="image/svg+xml" />
+                <data android:mimeType="text/markdown" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/rtf" />
+                <data android:mimeType="text/rtf" />
+                <data android:mimeType="text/html" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+                <data android:mimeType="image/png" />
+                <data android:mimeType="image/jpeg" />
+                <data android:mimeType="image/gif" />
+                <data android:mimeType="image/webp" />
+                <data android:mimeType="image/bmp" />
+                <data android:mimeType="image/tiff" />
             </intent-filter>
 
             <!-- Files whose provider reports a generic MIME type: match on extension.
                  Several pathPatterns per extension because Android's matcher is
                  non-greedy and stops at the first dot. Upper-case variants cover
-                 names such as DECK.PPTX from Windows shares. -->
+                 names such as ISSUE.QPP from Windows shares. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -59,122 +62,49 @@
                 <data android:mimeType="application/octet-stream" />
                 <data android:mimeType="application/zip" />
                 <data android:mimeType="application/x-zip-compressed" />
-                <data android:pathPattern=".*\\.pptx" />
-                <data android:pathPattern=".*\\..*\\.pptx" />
-                <data android:pathPattern=".*\\..*\\..*\\.pptx" />
-                <data android:pathPattern=".*\\.PPTX" />
-                <data android:pathPattern=".*\\..*\\.PPTX" />
-                <data android:pathPattern=".*\\..*\\..*\\.PPTX" />
-                <data android:pathPattern=".*\\.pptm" />
-                <data android:pathPattern=".*\\..*\\.pptm" />
-                <data android:pathPattern=".*\\..*\\..*\\.pptm" />
-                <data android:pathPattern=".*\\.PPTM" />
-                <data android:pathPattern=".*\\..*\\.PPTM" />
-                <data android:pathPattern=".*\\..*\\..*\\.PPTM" />
-                <data android:pathPattern=".*\\.ppsx" />
-                <data android:pathPattern=".*\\..*\\.ppsx" />
-                <data android:pathPattern=".*\\..*\\..*\\.ppsx" />
-                <data android:pathPattern=".*\\.PPSX" />
-                <data android:pathPattern=".*\\..*\\.PPSX" />
-                <data android:pathPattern=".*\\..*\\..*\\.PPSX" />
-                <data android:pathPattern=".*\\.ppsm" />
-                <data android:pathPattern=".*\\..*\\.ppsm" />
-                <data android:pathPattern=".*\\..*\\..*\\.ppsm" />
-                <data android:pathPattern=".*\\.PPSM" />
-                <data android:pathPattern=".*\\..*\\.PPSM" />
-                <data android:pathPattern=".*\\..*\\..*\\.PPSM" />
-                <data android:pathPattern=".*\\.potx" />
-                <data android:pathPattern=".*\\..*\\.potx" />
-                <data android:pathPattern=".*\\..*\\..*\\.potx" />
-                <data android:pathPattern=".*\\.POTX" />
-                <data android:pathPattern=".*\\..*\\.POTX" />
-                <data android:pathPattern=".*\\..*\\..*\\.POTX" />
-                <data android:pathPattern=".*\\.potm" />
-                <data android:pathPattern=".*\\..*\\.potm" />
-                <data android:pathPattern=".*\\..*\\..*\\.potm" />
-                <data android:pathPattern=".*\\.POTM" />
-                <data android:pathPattern=".*\\..*\\.POTM" />
-                <data android:pathPattern=".*\\..*\\..*\\.POTM" />
-                <data android:pathPattern=".*\\.ppt" />
-                <data android:pathPattern=".*\\..*\\.ppt" />
-                <data android:pathPattern=".*\\..*\\..*\\.ppt" />
-                <data android:pathPattern=".*\\.PPT" />
-                <data android:pathPattern=".*\\..*\\.PPT" />
-                <data android:pathPattern=".*\\..*\\..*\\.PPT" />
-                <data android:pathPattern=".*\\.pps" />
-                <data android:pathPattern=".*\\..*\\.pps" />
-                <data android:pathPattern=".*\\..*\\..*\\.pps" />
-                <data android:pathPattern=".*\\.PPS" />
-                <data android:pathPattern=".*\\..*\\.PPS" />
-                <data android:pathPattern=".*\\..*\\..*\\.PPS" />
-                <data android:pathPattern=".*\\.pot" />
-                <data android:pathPattern=".*\\..*\\.pot" />
-                <data android:pathPattern=".*\\..*\\..*\\.pot" />
-                <data android:pathPattern=".*\\.POT" />
-                <data android:pathPattern=".*\\..*\\.POT" />
-                <data android:pathPattern=".*\\..*\\..*\\.POT" />
-                <data android:pathPattern=".*\\.odp" />
-                <data android:pathPattern=".*\\..*\\.odp" />
-                <data android:pathPattern=".*\\..*\\..*\\.odp" />
-                <data android:pathPattern=".*\\.ODP" />
-                <data android:pathPattern=".*\\..*\\.ODP" />
-                <data android:pathPattern=".*\\..*\\..*\\.ODP" />
-                <data android:pathPattern=".*\\.otp" />
-                <data android:pathPattern=".*\\..*\\.otp" />
-                <data android:pathPattern=".*\\..*\\..*\\.otp" />
-                <data android:pathPattern=".*\\.OTP" />
-                <data android:pathPattern=".*\\..*\\.OTP" />
-                <data android:pathPattern=".*\\..*\\..*\\.OTP" />
-                <data android:pathPattern=".*\\.fodp" />
-                <data android:pathPattern=".*\\..*\\.fodp" />
-                <data android:pathPattern=".*\\..*\\..*\\.fodp" />
-                <data android:pathPattern=".*\\.FODP" />
-                <data android:pathPattern=".*\\..*\\.FODP" />
-                <data android:pathPattern=".*\\..*\\..*\\.FODP" />
-                <data android:pathPattern=".*\\.sxi" />
-                <data android:pathPattern=".*\\..*\\.sxi" />
-                <data android:pathPattern=".*\\..*\\..*\\.sxi" />
-                <data android:pathPattern=".*\\.SXI" />
-                <data android:pathPattern=".*\\..*\\.SXI" />
-                <data android:pathPattern=".*\\..*\\..*\\.SXI" />
-                <data android:pathPattern=".*\\.md" />
-                <data android:pathPattern=".*\\..*\\.md" />
-                <data android:pathPattern=".*\\..*\\..*\\.md" />
-                <data android:pathPattern=".*\\.MD" />
-                <data android:pathPattern=".*\\..*\\.MD" />
-                <data android:pathPattern=".*\\..*\\..*\\.MD" />
-                <data android:pathPattern=".*\\.qsp" />
-                <data android:pathPattern=".*\\..*\\.qsp" />
-                <data android:pathPattern=".*\\..*\\..*\\.qsp" />
-                <data android:pathPattern=".*\\.QSP" />
-                <data android:pathPattern=".*\\..*\\.QSP" />
-                <data android:pathPattern=".*\\..*\\..*\\.QSP" />
-                <data android:pathPattern=".*\\.qspe" />
-                <data android:pathPattern=".*\\..*\\.qspe" />
-                <data android:pathPattern=".*\\..*\\..*\\.qspe" />
-                <data android:pathPattern=".*\\.QSPE" />
-                <data android:pathPattern=".*\\..*\\.QSPE" />
-                <data android:pathPattern=".*\\..*\\..*\\.QSPE" />
+                <data android:mimeType="application/xml" />
+                <data android:mimeType="text/xml" />
+                <data android:pathPattern=".*\\.qpp" />
+                <data android:pathPattern=".*\\..*\\.qpp" />
+                <data android:pathPattern=".*\\..*\\..*\\.qpp" />
+                <data android:pathPattern=".*\\.QPP" />
+                <data android:pathPattern=".*\\..*\\.QPP" />
+                <data android:pathPattern=".*\\..*\\..*\\.QPP" />
+                <data android:pathPattern=".*\\.qppe" />
+                <data android:pathPattern=".*\\..*\\.qppe" />
+                <data android:pathPattern=".*\\..*\\..*\\.qppe" />
+                <data android:pathPattern=".*\\.QPPE" />
+                <data android:pathPattern=".*\\..*\\.QPPE" />
+                <data android:pathPattern=".*\\..*\\..*\\.QPPE" />
+                <data android:pathPattern=".*\\.sla" />
+                <data android:pathPattern=".*\\..*\\.sla" />
+                <data android:pathPattern=".*\\..*\\..*\\.sla" />
+                <data android:pathPattern=".*\\.SLA" />
+                <data android:pathPattern=".*\\..*\\.SLA" />
+                <data android:pathPattern=".*\\..*\\..*\\.SLA" />
             </intent-filter>
 
-            <!-- Receive presentations and text shared from other apps. -->
+            <!-- Receive publications, text and pictures shared from other apps. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation" />
-                <data android:mimeType="application/vnd.ms-powerpoint.presentation.macroEnabled.12" />
-                <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.slideshow" />
-                <data android:mimeType="application/vnd.ms-powerpoint.slideshow.macroEnabled.12" />
-                <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.template" />
-                <data android:mimeType="application/vnd.ms-powerpoint" />
-                <data android:mimeType="application/vnd.oasis.opendocument.presentation" />
-                <data android:mimeType="application/vnd.oasis.opendocument.presentation-template" />
-                <data android:mimeType="application/vnd.oasis.opendocument.flat-presentation" />
-                <data android:mimeType="application/vnd.sun.xml.impress" />
-                <data android:mimeType="text/markdown" />
-                <data android:mimeType="text/plain" />
                 <data android:mimeType="application/x-quillpress" />
                 <data android:mimeType="application/x-quillpress-encrypted" />
+                <data android:mimeType="application/x-scribus" />
+                <data android:mimeType="application/json" />
+                <data android:mimeType="image/svg+xml" />
+                <data android:mimeType="text/markdown" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/rtf" />
+                <data android:mimeType="text/rtf" />
+                <data android:mimeType="text/html" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+                <data android:mimeType="image/png" />
+                <data android:mimeType="image/jpeg" />
+                <data android:mimeType="image/gif" />
+                <data android:mimeType="image/webp" />
+                <data android:mimeType="image/bmp" />
+                <data android:mimeType="image/tiff" />
             </intent-filter>
 
         </activity>
@@ -195,6 +125,9 @@
         <package android:name="io.github.socrtwo.quillpen" />
         <package android:name="io.github.socrtwo.quillpost" />
         <package android:name="io.github.socrtwo.quillgrid" />
+        <package android:name="io.github.socrtwo.quillstage" />
+        <package android:name="io.github.socrtwo.quillloom" />
+        <package android:name="io.github.socrtwo.quillfolio" />
     </queries>
 
     <!-- Permissions -->

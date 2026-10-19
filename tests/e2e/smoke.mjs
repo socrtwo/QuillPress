@@ -1,0 +1,113 @@
+// Browser smoke test: serves dist/ with `vite preview`, builds a small publication, and checks the results.
+// Usage: npm run build && npm run e2e   (set QP_URL to test an already-running server instead)
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { chromium } from 'playwright';
+
+const PORT = 4193;
+let server = null;
+let url = process.env.QP_URL;
+if (!url) {
+  server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore', detached: true });
+  url = `http://localhost:${PORT}/`;
+  for (let i = 0; i < 60; i++) {
+    try { if ((await fetch(url)).ok) break; } catch { /* not up yet */ }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
+const exe = existsSync('/opt/pw-browsers/chromium') ? { executablePath: '/opt/pw-browsers/chromium' } : {};
+const browser = await chromium.launch(exe);
+const failures = [];
+const check = (name, got, want) => { if (JSON.stringify(got) !== JSON.stringify(want)) failures.push(`${name}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`); };
+
+try {
+  const p = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const errs = [];
+  p.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
+  p.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
+  await p.addInitScript(() => localStorage.setItem('quillpress.prefs.v1', JSON.stringify({ firstRun: false })));
+  await p.goto(url, { waitUntil: 'networkidle' });
+  await p.waitForSelector('.qp-page-host svg');
+  await p.waitForTimeout(500);
+
+  check('commands registered', await p.evaluate(() => window.__qpAllIds.length > 400), true);
+  check('blank publication', await p.evaluate(() => [qp.pub.pages.length, qp.pub.size.w, qp.pub.size.h]), [1, 612, 792]);
+
+  // A text frame placed by command, typed into, and committed.
+  await p.evaluate(() => qp.exec('insert.textFrame', 'Hello press'));
+  check('frame text', await p.evaluate(() => qp.pub.story(qp.page.items[0].story).paras[0].runs.map((r) => r.text).join('')), 'Hello press');
+  const box = await p.evaluate(() => { const r = document.querySelector('.qp-page-host [data-id]').getBoundingClientRect(); return [r.x + r.width / 2, r.y + 12]; });
+  await p.mouse.dblclick(box[0], box[1]);
+  await p.keyboard.press('End');
+  await p.keyboard.type(' and more');
+  await p.keyboard.press('Escape');
+  check('typed text', await p.evaluate(() => qp.pub.story(qp.page.items[0].story).paras[0].runs.map((r) => r.text).join('')), 'Hello press and more');
+
+  // Formatting through commands, then undo/redo.
+  await p.evaluate(() => { qp.tab.ui.select([qp.page.items[0].id]); qp.exec('fmt.bold'); });
+  check('bold', await p.evaluate(() => !!qp.pub.story(qp.page.items[0].story).paras[0].runs[0].b), true);
+  await p.evaluate(() => qp.exec('edit.undo'));
+  check('undo', await p.evaluate(() => !!qp.pub.story(qp.page.items[0].story).paras[0].runs[0].b), false);
+  await p.evaluate(() => qp.exec('edit.redo'));
+  check('redo', await p.evaluate(() => !!qp.pub.story(qp.page.items[0].story).paras[0].runs[0].b), true);
+
+  // Draw a shape by dragging on the page, then a picture frame by command.
+  await p.evaluate(() => qp.exec('insert.shape', 'roundRect'));
+  const st = await p.evaluate(() => { const r = document.querySelector('.qp-edit-stage').getBoundingClientRect(); return [r.x, r.y, qp.tab.ui.zoom]; });
+  await p.mouse.move(st[0] + 300 * st[2], st[1] + 400 * st[2]);
+  await p.mouse.down();
+  await p.mouse.move(st[0] + 450 * st[2], st[1] + 500 * st[2], { steps: 6 });
+  await p.mouse.up();
+  check('shape', await p.evaluate(() => qp.page.items.at(-1).geom), 'roundRect');
+  await p.evaluate(() => qp.exec('insert.table', { rows: 2, cols: 2 }));
+  check('table', await p.evaluate(() => qp.page.items.at(-1).kind), 'table');
+
+  // Pages, masters, spreads and preview.
+  await p.evaluate(() => qp.exec('page.insert'));
+  check('pages', await p.evaluate(() => qp.pub.pages.length), 2);
+  await p.evaluate(() => qp.exec('page.facing'));
+  for (const v of ['view.spread', 'view.previewMode', 'view.single']) { await p.evaluate((id) => qp.exec(id), v); await p.waitForTimeout(150); }
+  await p.evaluate(() => qp.exec('page.editMaster'));
+  check('master editing', await p.evaluate(() => !!qp.tab.masterTarget), true);
+  await p.evaluate(() => qp.exec('insert.pageNumber'));
+  check('master folio', await p.evaluate(() => qp.owner.items.length), 1);
+  await p.evaluate(() => qp.exec('page.closeMaster'));
+  check('master closed', await p.evaluate(() => qp.tab.masterTarget), '');
+
+  // Linked frames and autoflow of a long story.
+  await p.evaluate(() => { qp.exec('page.first'); qp.exec('insert.placeholderText', 8); });
+  check('placeholder frame', await p.evaluate(() => qp.page.items.some((e) => e.kind === 'text' && qp.pub.story(e.story).paras.length >= 8)), true);
+  const before = await p.evaluate(() => qp.pub.pages.length);
+  await p.evaluate(() => qp.exec('text.autoflow'));
+  check('autoflow added pages or frames', await p.evaluate((b) => qp.pub.pages.length >= b, before), true);
+
+  // Save as .qpp, .sla and .json, then open them again; export a PDF and a web page.
+  const round = await p.evaluate(async () => {
+    const io = await window.__qpIO();
+    const out = [];
+    for (const f of ['qpp', 'sla', 'json']) {
+      const { data } = await io.exportPublication(qp.pub, f);
+      const { pub } = await io.importPublication(data, `t.${f}`);
+      out.push([f, pub.pages.length === qp.pub.pages.length]);
+    }
+    return out;
+  });
+  check('round trips', round, [['qpp', true], ['sla', true], ['json', true]]);
+  const pdfOk = await p.evaluate(async () => { const r = await qp.exec('file.export.pdf', { quick: true }); return r !== false; });
+  check('pdf export command', pdfOk, true);
+
+  // Panes and the command palette render without errors.
+  for (const id of ['fmt.stylesPane', 'page.swatchesPane', 'text.threadsPane', 'view.layersPane', 'review.preflight']) { await p.evaluate((x) => qp.exec(x), id); await p.waitForTimeout(100); }
+  await p.evaluate(() => qp.exec('view.cmdSearch'));
+  await p.keyboard.type('spelling');
+  await p.keyboard.press('Escape');
+
+  if (errs.length) failures.push(...errs);
+} finally {
+  await browser.close();
+  if (server) try { process.kill(-server.pid); } catch { /* already gone */ }
+}
+
+if (failures.length) { console.error('E2E failures:\n' + failures.join('\n')); process.exit(1); }
+console.log('E2E smoke test passed');

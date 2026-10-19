@@ -1,7 +1,7 @@
 {
   "name": "QuillPress",
   "short_name": "QuillPress",
-  "description": "An open-source presentation app that opens and saves PowerPoint, OpenDocument and Markdown slides, with a complete, customizable command library.",
+  "description": "An open-source desktop publishing and page layout app: frame-based pages, master pages, linked text, styles and PDF export, with a complete, customizable command library.",
   "id": "./",
   "start_url": "./",
   "scope": "./",
@@ -11,11 +11,11 @@
     "standalone"
   ],
   "background_color": "#ffffff",
-  "theme_color": "#8F3618",
+  "theme_color": "#3E2672",
   "categories": [
     "productivity",
     "business",
-    "utilities"
+    "graphics"
   ],
   "icons": [
     {
@@ -46,40 +46,22 @@
   "file_handlers": [
     {
       "action": "./",
-      "name": "Presentation",
+      "name": "Publication",
       "accept": {
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation": [
-          ".pptx"
-        ],
-        "application/vnd.ms-powerpoint.presentation.macroEnabled.12": [
-          ".pptm"
-        ],
-        "application/vnd.openxmlformats-officedocument.presentationml.slideshow": [
-          ".ppsx"
-        ],
-        "application/vnd.openxmlformats-officedocument.presentationml.template": [
-          ".potx"
-        ],
-        "application/vnd.ms-powerpoint": [
-          ".ppt",
-          ".pps",
-          ".pot"
-        ],
-        "application/vnd.oasis.opendocument.presentation": [
-          ".odp"
-        ],
-        "application/vnd.oasis.opendocument.flat-presentation": [
-          ".fodp"
-        ],
-        "text/markdown": [
-          ".md",
-          ".markdown"
-        ],
         "application/x-quillpress": [
-          ".qsp"
+          ".qpp"
         ],
         "application/x-quillpress-encrypted": [
-          ".qspe"
+          ".qppe"
+        ],
+        "application/x-scribus": [
+          ".sla"
+        ],
+        "application/json": [
+          ".json"
+        ],
+        "image/svg+xml": [
+          ".svg"
         ]
       }
     }

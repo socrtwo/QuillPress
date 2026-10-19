@@ -73,7 +73,7 @@ public class QuillNativePlugin extends Plugin {
     private static final String SHARE_DIR = "shared";
     private static final long SHARE_FILE_MAX_AGE_MS = 24L * 60L * 60L * 1000L;
 
-    /** Single background thread for file I/O so large presentations never block the UI or the plugin queue. */
+    /** Single background thread for file I/O so large publications never block the UI or the plugin queue. */
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     /** Large payloads waiting for an activity result, kept out of the call's saved state. */
     private static final java.util.Map<String, String> pendingData = new java.util.concurrent.ConcurrentHashMap<>();
@@ -270,7 +270,7 @@ public class QuillNativePlugin extends Plugin {
             try {
                 call.resolve(readDocument(uri, null));
             } catch (Throwable e) {
-                call.reject("Could not read presentation: " + e.getMessage(), asException(e));
+                call.reject("Could not read publication: " + e.getMessage(), asException(e));
             }
         });
     }
@@ -312,7 +312,7 @@ public class QuillNativePlugin extends Plugin {
         }
         if (data == null) {
             // The app process was recreated while the picker was open.
-            call.reject("The presentation was not kept while the file picker was open. Please save again.");
+            call.reject("The publication was not kept while the file picker was open. Please save again.");
             return;
         }
         io.execute(() -> {
@@ -325,7 +325,7 @@ public class QuillNativePlugin extends Plugin {
                 ret.put("name", name != null ? name : call.getString("name", ""));
                 call.resolve(ret);
             } catch (Throwable e) {
-                call.reject("Could not save presentation: " + e.getMessage(), asException(e));
+                call.reject("Could not save publication: " + e.getMessage(), asException(e));
             }
         });
     }
@@ -345,7 +345,7 @@ public class QuillNativePlugin extends Plugin {
                 ret.put("ok", true);
                 call.resolve(ret);
             } catch (Throwable e) {
-                call.reject("Could not write presentation: " + e.getMessage(), asException(e));
+                call.reject("Could not write publication: " + e.getMessage(), asException(e));
             }
         });
     }
@@ -361,7 +361,7 @@ public class QuillNativePlugin extends Plugin {
             try {
                 call.resolve(readDocument(Uri.parse(uriString), null));
             } catch (Throwable e) {
-                call.reject("Could not read presentation: " + e.getMessage(), asException(e));
+                call.reject("Could not read publication: " + e.getMessage(), asException(e));
             }
         });
     }
@@ -372,7 +372,7 @@ public class QuillNativePlugin extends Plugin {
 
     @PluginMethod
     public void print(PluginCall call) {
-        final String jobName = call.getString("jobName", "QuillPress presentation");
+        final String jobName = call.getString("jobName", "QuillPress publication");
         final Activity activity = getActivity();
         if (activity == null) {
             call.reject("Printing is not available right now");
@@ -397,7 +397,7 @@ public class QuillNativePlugin extends Plugin {
 
     @PluginMethod
     public void share(PluginCall call) {
-        final String name = sanitizeFileName(call.getString("name", "presentation"));
+        final String name = sanitizeFileName(call.getString("name", "publication"));
         final String mime = call.getString("mime", "application/octet-stream");
         final String data = call.getString("data");
         final String title = call.getString("title", name);
@@ -443,7 +443,7 @@ public class QuillNativePlugin extends Plugin {
                     }
                 });
             } catch (Throwable e) {
-                call.reject("Could not share presentation: " + e.getMessage(), asException(e));
+                call.reject("Could not share publication: " + e.getMessage(), asException(e));
             }
         });
     }
@@ -739,33 +739,23 @@ public class QuillNativePlugin extends Plugin {
         }
         String ext = name.substring(dot + 1).toLowerCase(Locale.ROOT);
         switch (ext) {
-            case "pptx":
-                return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-            case "pptm":
-                return "application/vnd.ms-powerpoint.presentation.macroEnabled.12";
-            case "ppsx":
-                return "application/vnd.openxmlformats-officedocument.presentationml.slideshow";
-            case "ppsm":
-                return "application/vnd.ms-powerpoint.slideshow.macroEnabled.12";
-            case "potx":
-                return "application/vnd.openxmlformats-officedocument.presentationml.template";
-            case "potm":
-                return "application/vnd.ms-powerpoint.template.macroEnabled.12";
-            case "ppt":
-            case "pps":
-            case "pot":
-                return "application/vnd.ms-powerpoint";
-            case "odp":
-                return "application/vnd.oasis.opendocument.presentation";
-            case "otp":
-                return "application/vnd.oasis.opendocument.presentation-template";
-            case "fodp":
-                return "application/vnd.oasis.opendocument.flat-presentation";
+            case "qpp":
+                return "application/x-quillpress";
+            case "qppe":
+                return "application/x-quillpress-encrypted";
+            case "sla":
+                return "application/x-scribus";
+            case "svg":
+                return "image/svg+xml";
             case "md":
             case "markdown":
                 return "text/markdown";
             case "txt":
                 return "text/plain";
+            case "rtf":
+                return "application/rtf";
+            case "docx":
+                return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
             case "htm":
             case "html":
                 return "text/html";
@@ -775,10 +765,9 @@ public class QuillNativePlugin extends Plugin {
                 return "application/json";
             case "pdf":
                 return "application/pdf";
-            case "qsp":
-                return "application/x-quillpress";
-            case "qspe":
-                return "application/x-quillpress-encrypted";
+            case "tif":
+            case "tiff":
+                return "image/tiff";
             default:
                 return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
         }
@@ -862,7 +851,7 @@ public class QuillNativePlugin extends Plugin {
     private static String sanitizeFileName(String name) {
         String cleaned = name == null ? "" : name.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_").trim();
         if (cleaned.isEmpty() || ".".equals(cleaned) || "..".equals(cleaned)) {
-            return "presentation";
+            return "publication";
         }
         return cleaned;
     }

@@ -30,8 +30,9 @@ export function frameBoxes(frame: TextFrame, owner: { items: Item[] }, pageIndex
 /** Rectangles that text in `frame` must flow around: objects above it in z-order with a wrap mode. */
 export function wrapExclusions(frame: TextFrame, owner: { items: Item[] }, pub: Pub): Rect[] {
   const out: Rect[] = [];
+  if (frame.ignoreWrap) return out;
   const all = owner.items;
-  const fi = all.findIndex((e) => e.id === frame.id || (e.kind === 'group' && !!pub.findItem(e, frame.id)));
+  const fi = all.findIndex((e) => e.id === frame.id || (e.kind === 'group' && !!pub.findItem({ items: e.children }, frame.id)));
   const page = pub.pageOfItem(frame.id);
   const pw = pub.size.w;
   const walk = (items: Item[], above: boolean) => {

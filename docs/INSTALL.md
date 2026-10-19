@@ -36,7 +36,7 @@ xattr -dr com.apple.quarantine /Applications/QuillPress.app
 sudo apt install ./QuillPress-<v>-linux-arm64.deb     # or -amd64 / -armv7l
 ```
 
-QuillPress then appears in the Office menu, and presentation files offer **Open With ▸ QuillPress**. To remove it: `sudo apt remove quillpress`.
+QuillPress then appears in the Office menu, and publication files offer **Open With ▸ QuillPress**. To remove it: `sudo apt remove quillpress`.
 
 AppImage (any distribution, no install):
 
@@ -53,7 +53,7 @@ Pick one:
 
 1. **Android app**: on Chromebooks with Google Play, install the APK (it requires Android app sideloading or developer mode) or use the Play Store build when it is published.
 2. **Linux app**: turn on **Settings ▸ Advanced ▸ Developers ▸ Linux development environment**. Then double-click the `.deb` in the Files app: use `amd64` on Intel/AMD Chromebooks and `arm64` on ARM Chromebooks.
-3. **Web app**: open a hosted copy of QuillPress in Chrome, then **⋮ ▸ Cast, save and share ▸ Install page as app**. It then works offline and opens .pptx, .odp and Markdown slide files from the Files app.
+3. **Web app**: open a hosted copy of QuillPress in Chrome, then **⋮ ▸ Cast, save and share ▸ Install page as app**. It then works offline and opens .pptx, .odp and Markdown page files from the Files app.
 
 ## Android
 
@@ -66,7 +66,7 @@ Apple only allows apps from the App Store or apps signed for your own devices. T
 - **Sideloadly** or **AltStore** (Windows/macOS): drag in the `.ipa` and sign in with your Apple ID. A free Apple ID signs for 7 days at a time; a paid developer account signs for a year.
 - **Xcode** (macOS): build from source with `npm run ios:sync`, open `ios/App/App.xcodeproj`, pick your team under *Signing & Capabilities*, and run on your device.
 
-On iOS, presentations appear in the Files app's **Open in** and **Share** menus. **Save** writes to **Files ▸ On My iPhone ▸ QuillPress**, and **Open** uses the system file picker. **Share** offers the share sheet. The iOS build uses the web versions of these functions; Android has a native plugin with more features (writing back to a file opened from another app, **Open with** from other apps, printing through the system service).
+On iOS, publications appear in the Files app's **Open in** and **Share** menus. **Save** writes to **Files ▸ On My iPhone ▸ QuillPress**, and **Open** uses the system file picker. **Share** offers the share sheet. The iOS build uses the web versions of these functions; Android has a native plugin with more features (writing back to a file opened from another app, **Open with** from other apps, printing through the system service).
 
 ## Web
 
