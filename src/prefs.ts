@@ -1,4 +1,5 @@
 /** Application preferences (per device), persisted to localStorage. */
+import { PAGE_SIZES, type Publication } from './model/types';
 
 export interface CustomGroup { id: string; label: string; items: string[] }
 export interface CustomTab { id: string; label: string; groups: CustomGroup[]; hidden?: boolean }
@@ -6,7 +7,7 @@ export interface RecentEntry { key: string; name: string; when: number; uri?: st
 export interface Macro { name: string; steps: { id: string; arg?: any }[]; description?: string; key?: string; created: number }
 
 export const DEFAULT_REPLACEMENTS: Record<string, string> = {
-  '(c)': '©', '(r)': '®', '(tm)': '™', '...': '…', '->': '→', '<-': '←', '=>': '⇒', '<=>': '⇔', '+-': '±', '!=': '≠', '--': '–',
+  '(c)': '©', '(r)': '®', '(tm)': '™', '...': '…', '->': '→', '<-': '←', '=>': '⇒', '<=>': '⇔', '+-': '±', '!=': '≠', '--': '–', '---': '—',
   teh: 'the', adn: 'and', recieve: 'receive', seperate: 'separate', occured: 'occurred', untill: 'until', wich: 'which', thier: 'their', accomodate: 'accommodate', definately: 'definitely',
 };
 
@@ -25,10 +26,8 @@ export interface Prefs {
   autosaveSeconds: number;
   replacements: Record<string, string>;
   autoCorrect: boolean;
-  /** Capitalize the first letter of sentences and of placeholder text. */
   autoCapitalize: boolean;
   smartQuotes: boolean;
-  /** Automatic bulleted and numbered lists when a paragraph starts with "* " or "1. ". */
   autoLists: boolean;
   theme: 'system' | 'light' | 'dark';
   ribbon: 'full' | 'tabs' | 'hidden';
@@ -48,35 +47,39 @@ export interface Prefs {
   firstRun: boolean;
   touchMode: boolean;
   miniToolbar: boolean;
-  /** Presentation editing options */
-  defaultTheme: number;
-  defaultSize: 'wide' | 'standard';
+  /** Layout options */
+  unit: Publication['unit'];
+  defaultPageSize: { w: number; h: number };
+  defaultFacing: boolean;
+  defaultMargins: [number, number, number, number];
+  defaultColumns: number;
+  snapToGuides: boolean;
   snapToGrid: boolean;
   gridSize: number;
   showGrid: boolean;
   showGuides: boolean;
+  showBaselineGrid: boolean;
   smartGuides: boolean;
   showRulers: boolean;
-  showNotes: boolean;
-  showThumbnails: boolean;
-  /** Slide show */
-  presenterView: boolean;
-  showEndBlack: boolean;
-  penColor: string;
-  laserColor: string;
-  subtitles: boolean;
-  /** Seconds per slide for Timed Format (0 = off). */
-  timerWarn: number;
+  showFrameEdges: boolean;
+  showTextThreads: boolean;
+  showPagesPane: boolean;
+  /** Typographer's quotes while typing. */
+  typographerQuotes: boolean;
+  /** Greek (gray out) text below this size on screen, points; 0 = never. */
+  greekBelow: number;
+  /** Picture display quality. */
+  displayQuality: 'fast' | 'typical' | 'high';
 }
 
-export const DEFAULT_QAT = ['file.save', 'edit.undo', 'edit.redo', 'show.fromStart', 'slide.new', 'view.cmdSearch'];
+export const DEFAULT_QAT = ['file.save', 'edit.undo', 'edit.redo', 'file.print', 'page.insert', 'view.cmdSearch'];
 
 /**
- * The Quick Access Bar drop-down checklist: the union of the choices desktop presentation programs
- * have offered (docs/QAT.md), then presentation extras.
+ * The Quick Access Bar drop-down checklist: the union of the choices desktop office programs have
+ * offered (docs/QAT.md), then publishing extras.
  */
-export const QAT_STANDARD = ['file.autosave', 'file.new', 'file.open', 'file.save', 'file.email', 'file.quickPrint', 'file.print', 'review.spelling', 'edit.undo', 'edit.redo', 'show.fromStart', 'view.touchMode', 'file.openRecent'];
-export const QAT_EXTRAS = ['show.fromCurrent', 'show.presenterView', 'slide.new', 'slide.duplicate', 'file.saveAs', 'file.share', 'file.export.pdf', 'insert.drawTable', 'edit.find', 'edit.formatPainter', 'view.cmdSearch'];
+export const QAT_STANDARD = ['file.autosave', 'file.new', 'file.open', 'file.save', 'file.email', 'file.quickPrint', 'file.print', 'review.spelling', 'edit.undo', 'edit.redo', 'view.previewMode', 'view.touchMode', 'file.openRecent'];
+export const QAT_EXTRAS = ['page.insert', 'insert.textFrame', 'insert.picture', 'file.saveAs', 'file.share', 'file.export.pdf', 'insert.drawTable', 'edit.find', 'edit.formatPainter', 'view.cmdSearch'];
 export const QAT_CHOICES = [...QAT_STANDARD, ...QAT_EXTRAS];
 /** Kept first, in this order, by addAllQatChoices. */
 export const QAT_PINNED_FIRST = ['file.save', 'file.print'];
@@ -95,6 +98,7 @@ export function addAllQatChoices(current: string[], labelOf: (id: string) => str
 }
 
 export function defaultPrefs(): Prefs {
+  const letter = PAGE_SIZES[0];
   return {
     author: 'Author', initials: 'A',
     qat: [...DEFAULT_QAT], qatPosition: 'top', qatLabels: false, qatHidden: false,
@@ -103,11 +107,11 @@ export function defaultPrefs(): Prefs {
     replacements: { ...DEFAULT_REPLACEMENTS }, autoCorrect: true, autoCapitalize: true, smartQuotes: true, autoLists: true,
     theme: 'system', ribbon: 'full', spellcheck: true,
     recent: [], macros: [], dictionary: [], ignoredWords: [],
-    language: 'en-US', spellDialect: 'any', confirmClose: true, defaultSaveFormat: 'pptx', readAloudRate: 1,
+    language: 'en-US', spellDialect: 'any', confirmClose: true, defaultSaveFormat: 'qpp', readAloudRate: 1,
     highContrastUI: false, uiScale: 1, pinnedCommands: [], firstRun: true, touchMode: false, miniToolbar: true,
-    defaultTheme: 0, defaultSize: 'wide', snapToGrid: true, gridSize: 12, showGrid: false, showGuides: false, smartGuides: true,
-    showRulers: false, showNotes: true, showThumbnails: true,
-    presenterView: true, showEndBlack: true, penColor: '#E53935', laserColor: '#FF1744', subtitles: false, timerWarn: 0,
+    unit: 'in', defaultPageSize: { w: letter.w, h: letter.h }, defaultFacing: false, defaultMargins: [36, 36, 36, 36], defaultColumns: 1,
+    snapToGuides: true, snapToGrid: false, gridSize: 12, showGrid: false, showGuides: true, showBaselineGrid: false, smartGuides: true,
+    showRulers: true, showFrameEdges: true, showTextThreads: false, showPagesPane: true, typographerQuotes: true, greekBelow: 0, displayQuality: 'typical',
   };
 }
 
@@ -127,7 +131,7 @@ export function loadPrefs(): Prefs {
 
 const ENUMS: Partial<Record<keyof Prefs, readonly string[]>> = {
   qatPosition: ['top', 'below', 'bottom'], theme: ['system', 'light', 'dark'], ribbon: ['full', 'tabs', 'hidden'],
-  spellDialect: ['any', 'document', 'en-US', 'en-GB', 'en-CA', 'en-AU'], defaultSize: ['wide', 'standard'],
+  spellDialect: ['any', 'document', 'en-US', 'en-GB', 'en-CA', 'en-AU'], unit: ['in', 'mm', 'cm', 'pt', 'pica', 'px'], displayQuality: ['fast', 'typical', 'high'],
 };
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v);
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
@@ -151,6 +155,8 @@ export function sanitizePrefs(raw: unknown): Partial<Prefs> {
   }
   if (out.recent) out.recent = out.recent.filter((r: any) => isObj(r) && typeof r.key === 'string' && typeof r.name === 'string');
   if (out.macros) out.macros = out.macros.filter((m: any) => isObj(m) && typeof m.name === 'string' && Array.isArray(m.steps) && m.steps.every((s: any) => isObj(s) && typeof s.id === 'string'));
+  if (out.defaultPageSize && !(out.defaultPageSize.w > 0 && out.defaultPageSize.h > 0)) delete out.defaultPageSize;
+  if (out.defaultMargins && !(Array.isArray(out.defaultMargins) && out.defaultMargins.length === 4 && out.defaultMargins.every((x: any) => typeof x === 'number'))) delete out.defaultMargins;
   return out as Partial<Prefs>;
 }
 
