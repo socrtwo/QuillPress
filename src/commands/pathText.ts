@@ -6,7 +6,6 @@ import { newId } from '../model/pub';
 import { geometryPath } from '../model/geometry';
 import { PATH_TEXT_PRESETS, pathTextString } from '../render/pathText';
 import { selection, edit, placeNew, insertItem, pathTextTargets } from '../edit/ops';
-import { paraText } from '../edit/textEdit';
 import { notesMarkup, parseNotesMarkup, pruneNotes } from './notes';
 import { DEFAULT_FOOTNOTE_OPTIONS } from '../model/types';
 import { openDialog, toast, showMenu } from '../ui/dialog';

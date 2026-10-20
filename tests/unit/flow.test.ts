@@ -5,6 +5,7 @@ import { frameBoxes, storyLayout, oversetFrames, neededHeight, wrapExclusions, f
 import { pathTextGlyphs, pathTextLayout, pathTextNotes, PATH_TEXT_PRESETS } from '../../src/render/pathText';
 import { tableLayout } from '../../src/render/table';
 import { pageSvg } from '../../src/render/page';
+import { pubToPdf } from '../../src/export/pdf';
 import type { PathTextItem, TableItem } from '../../src/model/types';
 import { autoflowStory } from '../../src/edit/flowOps';
 import { LOREM } from '../../src/templates/lorem';
@@ -368,5 +369,23 @@ describe('footnotes in tables and path text, optical margin alignment', () => {
     // Drop caps and bullets are not hung.
     const drop = layoutStory(parasFromText('“Alpha beta gamma delta epsilon zeta eta theta iota kappa'), { boxes, resolve: () => ({ props: { opticalMargin: true, dropCap: { lines: 2, chars: 1 } }, run: { size: 12, font: 'Tinos' } }), resolveRun: (b: any, x: any) => ({ ...b, ...x }) } as any).lines[0];
     expect(drop.hang?.[0] ?? 0).toBe(0);
+  });
+
+  it('writes table and path text notes to the PDF under their items', async () => {
+    const pub = Pub.blank();
+    const t = noteTable();
+    const item = { id: 'p1', kind: 'pathText', x: 100, y: 400, w: 200, h: 100, rot: 30, path: { d: PATH_TEXT_PRESETS.line.d, w: 200, h: 100 }, text: [{ style: 'Body', runs: [{ text: 'Hi', size: 12 }, { text: 'x', footnote: 'fp', size: 12 }] }], align: 'start', offset: 0, baseline: 0, footnotes: [{ id: 'fp', paras: [{ style: 'Footnote', runs: [{ text: 'Rotated note' }] }] }] } as PathTextItem;
+    pub.pages[0].items.push(t, item);
+    const s = new TextDecoder('latin1').decode(await pubToPdf(pub, {}));
+    expect(s.startsWith('%PDF-1.')).toBe(true);
+    // Both note areas draw a separator rule (0.5 wide, black) after their item.
+    expect((s.match(/0 G 0\.5 w /g) || []).length).toBeGreaterThanOrEqual(2);
+    // A plain table and path text make a shorter page stream.
+    const plain = new TextDecoder('latin1').decode(await pubToPdf(Object.assign(Pub.blank(), { }), {}));
+    void plain;
+    const pub2 = Pub.blank();
+    pub2.pages[0].items.push({ ...noteTable(), footnotes: undefined }, { ...item, footnotes: undefined });
+    const s2 = new TextDecoder('latin1').decode(await pubToPdf(pub2, {}));
+    expect(s.length).toBeGreaterThan(s2.length + 100);
   });
 });
