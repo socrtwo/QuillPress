@@ -262,7 +262,9 @@ function textFrameSvg(ctx: Ctx, f: TextFrame, owner: Owner, fromMaster: boolean)
   ctx.defs.push(`<clipPath id="${clipId}"><path d="${d}"/></clipPath>`);
   const sepW = (pub.data.footnoteOptions || DEFAULT_FOOTNOTE_OPTIONS).separator.width;
   const seps = separators.filter((sp) => sp.w > 0 && sepW > 0).map((sp) => `<path d="M${n(sp.x)} ${n(sp.y)} H${n(sp.x + sp.w)}" stroke="${colorHex(pub.data, 'Black')}" stroke-width="${n(sepW)}" class="qp-fn-sep"/>`).join('');
-  out += `<g clip-path="url(#${clipId})" transform="translate(${n(-f.x)} ${n(-f.y)})">${linesSvg(ctx, lines)}${seps}</g>`;
+  // The clip is defined in the frame's own box, so it goes on a group WITHOUT the translation that maps the
+  // lines (page coordinates) into it; a clip on the translated group would be read in page coordinates.
+  out += `<g clip-path="url(#${clipId})"><g transform="translate(${n(-f.x)} ${n(-f.y)})">${linesSvg(ctx, lines)}${seps}</g></g>`;
   if (ctx.opts.mode === 'edit') {
     if (ctx.opts.frameEdges !== false) out += `<path d="${d}" fill="none" stroke="#9aa0a6" stroke-width="0.5" stroke-dasharray="2 2" vector-effect="non-scaling-stroke" class="qp-frame-edge"/>`;
     if (overset) out += `<g class="qp-overset" transform="translate(${n(f.w - 10)} ${n(f.h - 10)})"><rect width="9" height="9" fill="#fff" stroke="#d32f2f" stroke-width="0.8"/><path d="M4.5 2 V7 M2 4.5 H7" stroke="#d32f2f" stroke-width="1.2"/></g>`;
