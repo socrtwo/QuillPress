@@ -6,13 +6,13 @@ Every page layout format QuillPress intends to recognize, current and historical
 |---|---|---|---|---|
 | QuillPress publication | .qpp .qppe .json | ZIP with `mimetype` = `application/x-quillpress`; `QFDE1`; JSON with `"format":"quillpress"` | **Open and save** | — |
 | Scribus | .sla, .sla.gz | XML `<SCRIBUSUTF8NEW` (1.3+) or `<SCRIBUSUTF8` (1.2) | **Open and save** (1.4, 1.5) | Gzip-compressed .sla.gz; 1.2 files; tables' cell text; text on path as a path |
-| Microsoft Publisher | .pub | Compound file (OLE2) with a `Quill` stream | Not yet | Milestone M5: read the published [MS-PUB] structure: pages, text boxes (Quill text), pictures, shapes; no save |
-| InDesign Markup | .idml | ZIP with `designmap.xml` and `mimetype` = `application/vnd.adobe.indesign-idml-package` | Not yet | M5: spreads, master spreads, text frames and stories, paragraph/character/object styles, swatches, linked pictures by name; save as IDML later |
-| InDesign binary | .indd | `DOCUMENT` / `0606EDF5D81D46E5BD31EFE7FE74B71D` GUID header | Not yet | Identification only (text and pictures by harvest); point to IDML export |
-| QuarkXPress | .qxp .qxd .qxt | Big-endian `MMXPR3` / `IIXPR3` header | Not yet | Identification; text and picture harvest; a reader for the published 3/4 structures later |
-| QuarkXPress Tags / XPress Tags | .xtg | Text starting `<v` version tag | Not yet | M4: place as text with styles |
-| PageMaker | .pmd .p65 .pm6 .pmt | `00 00 FF FF` + `PageMaker` strings | Not yet | Identification and harvest |
-| FrameMaker MIF | .mif | Text starting `<MIFFile` | Not yet | M5: pages, text flows, paragraph formats |
+| Microsoft Publisher | .pub | Compound file (OLE2) with a `Quill` stream | **Text and pictures** | No public specification exists for Publisher's structures (the Microsoft Open Specifications cover the container, [MS-CFB], and the drawing records, [MS-ODRAW], which QuillPress uses). Layout, frames and styles would need a clean-room reconstruction of the `Contents` stream; not planned until a source exists |
+| InDesign Markup | .idml | ZIP with `designmap.xml` and `mimetype` = `application/vnd.adobe.indesign-idml-package` | **Open** (spreads, masters, frames, chains, stories, styles, colors, layers, sections, variables; linked pictures by name) | Save as IDML; anchored objects as anchors; tables as tables; effects |
+| InDesign binary | .indd .indt | GUID header `0606EDF5-D81D-46E5-BD31-EFE7FE74B71D` | **Text and pictures** | Identification and harvest only; the app points to IDML export |
+| QuarkXPress | .qxp .qxd .qxt | `MMXPR3` (Mac) / `IIXPR3` (Windows) header at offset 2 | **Text and pictures** | A layout reader only if a public specification or a permissively licensed reference appears |
+| QuarkXPress Tags / XPress Tags | .xtg | Text starting with `<v6.00><e0>` (version, encoding) | **Open** (style sheets, paragraphs, character formatting) | Place into an existing frame; export as XPress Tags |
+| PageMaker | .pmd .p65 .pm6 .pmt | `00 00 FF FF` / `FF FF 00 00` + `PageMaker` in the header | **Text and pictures** | — |
+| FrameMaker MIF | .mif | Text starting `<MIFFile` | **Open** (pages, text rectangles, flows, paragraph formats, inline fonts) | Tables, anchored frames, graphics, master pages, variables |
 | FrameMaker binary | .fm .book | `<MakerFile` | Not yet | Identification and harvest |
 | Ventura Publisher | .chp .vp | Text chapter files with `@` tags; `.vp` binary | Not yet | Tagged text import (`@HEADLINE = …`) |
 | Affinity Publisher | .afpub | Binary; identification by name | Not yet | Identification only (no public specification) |
@@ -31,5 +31,5 @@ Every page layout format QuillPress intends to recognize, current and historical
 ## Priorities
 
 1. **Scribus** stays the open interchange format: anything another program can save as .sla reaches QuillPress.
-2. **IDML** is the most useful proprietary interchange (an open-specification ZIP of XML), then **Publisher** (specification published by Microsoft).
-3. Binary formats without specifications (QuarkXPress, Affinity, PageMaker, FrameMaker binaries) get identification and harvesting; full readers only if specifications or open-source references exist.
+2. **IDML** (Adobe's documented package) and **XPress Tags** and **MIF** (documented text formats) are read as layouts or formatted text; they are the interchange routes from InDesign, QuarkXPress and FrameMaker.
+3. Binary formats without public specifications (Publisher, QuarkXPress, PageMaker, InDesign binary, Affinity, FrameMaker binaries) get identification and text-and-picture recovery; full readers only if specifications or permissively licensed references exist. The Document Liberation Project's readers (MPL) were consulted as references, not copied.

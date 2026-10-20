@@ -10,6 +10,7 @@ export interface FormatDef { id: string; label: string; ext: string[]; mime: str
 export const QPP_MIME = 'application/x-quillpress';
 export const QPPE_MIME = 'application/x-quillpress-encrypted';
 export const SLA_MIME = 'application/x-scribus';
+export const IDML_MIME = 'application/vnd.adobe.indesign-idml-package';
 
 export const FORMATS: FormatDef[] = [
   { id: 'qpp', label: 'QuillPress Publication', ext: ['qpp'], mime: QPP_MIME, canImport: true, canExport: true },
@@ -23,6 +24,14 @@ export const FORMATS: FormatDef[] = [
   { id: 'docx', label: 'Word Document', ext: ['docx'], mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', canImport: true, canExport: false },
   { id: 'html', label: 'Web Page', ext: ['html', 'htm'], mime: 'text/html', canImport: true, canExport: false },
   { id: 'image', label: 'Picture', ext: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff'], mime: 'image/*', canImport: true, canExport: false },
+  // Other page layout programs' formats (docs/FORMATS.md says how much of each is read).
+  { id: 'idml', label: 'InDesign Markup (IDML)', ext: ['idml'], mime: IDML_MIME, canImport: true, canExport: false },
+  { id: 'indd', label: 'InDesign Document', ext: ['indd', 'indt'], mime: 'application/x-indesign', canImport: true, canExport: false },
+  { id: 'pub', label: 'Microsoft Publisher Publication', ext: ['pub'], mime: 'application/x-mspublisher', canImport: true, canExport: false },
+  { id: 'qxp', label: 'QuarkXPress Document', ext: ['qxp', 'qxd', 'qxt'], mime: 'application/vnd.quark.quarkxpress', canImport: true, canExport: false },
+  { id: 'pmd', label: 'PageMaker Publication', ext: ['pmd', 'p65', 'pm6', 'pmt', 'pm5'], mime: 'application/x-pagemaker', canImport: true, canExport: false },
+  { id: 'mif', label: 'FrameMaker Interchange (MIF)', ext: ['mif'], mime: 'application/x-mif', canImport: true, canExport: false },
+  { id: 'xtg', label: 'XPress Tags', ext: ['xtg'], mime: 'text/x-xpress-tags', canImport: true, canExport: false },
 ];
 
 export function formatById(id: string): FormatDef | undefined { return FORMATS.find((f) => f.id === id); }
@@ -55,12 +64,19 @@ export function sniffFormat(data: Uint8Array, name: string): string | null {
   if (head.startsWith('PK\x03\x04') || head.startsWith('PK\x05\x06')) {
     if (contains(data, QPP_MIME, 120)) return 'qpp';
     if (contains(data, 'publication.json', 4096)) return 'qpp';
+    if (contains(data, IDML_MIME, 160) || contains(data, 'designmap.xml')) return 'idml';
     if (contains(data, 'word/document.xml') || contains(data, 'word/')) return 'docx';
     return byName;
   }
   if (head.startsWith('\x89PNG') || head.startsWith('\xff\xd8\xff') || head.startsWith('GIF8') || head.startsWith('BM') || head.startsWith('II*\x00') || head.startsWith('MM\x00*') || (head.startsWith('RIFF') && ascii(data, 8, 12) === 'WEBP')) return 'image';
   if (head.startsWith('{\\rtf')) return 'rtf';
+  if (data[0] === 0x06 && data[1] === 0x06 && data[2] === 0xed && data[3] === 0xf5) return 'indd';
+  if (data[0] === 0xd0 && data[1] === 0xcf && data[2] === 0x11 && data[3] === 0xe0) return byName === 'pub' || contains(data, 'Q\x00u\x00i\x00l\x00l\x00') ? 'pub' : byName;
+  if (/^.{2}(MM|II)XPR[0-9]/s.test(head)) return 'qxp';
+  if (((data[0] === 0 && data[1] === 0 && data[2] === 0xff && data[3] === 0xff) || (data[0] === 0xff && data[1] === 0xff && data[2] === 0 && data[3] === 0)) && (contains(data, 'PageMaker', 8192) || byName === 'pmd')) return 'pmd';
   const text = new TextDecoder().decode(data.subarray(0, 4096)).replace(/^﻿/, '');
+  if (/^\s*<MIFFile/.test(text)) return 'mif';
+  if (/^<v\d+(\.\d+)?><e\d>/.test(text) || (byName === 'xtg' && /^@/.test(text))) return 'xtg';
   if (/^\s*</.test(text) && /<SCRIBUSUTF8NEW|<SCRIBUS/i.test(text)) return 'sla';
   if (/^\s*</.test(text) && /<svg[\s>]/i.test(text)) return 'svg';
   if (/^\s*</.test(text) && /<(!doctype\s+html|html|body)[\s>]/i.test(text)) return 'html';
@@ -90,6 +106,11 @@ export async function importPublication(data: Uint8Array, name: string, opts: { 
       }
       case 'json': return (await import('./qpp')).importJson(data);
       case 'sla': { const r = await (await import('./sla')).importSla(data); warnings.push(...r.warnings); return r.pub; }
+      case 'idml': { const r = await (await import('./idml')).importIdml(data); warnings.push(...r.warnings); return r.pub; }
+      case 'pub': { const r = await (await import('./mspub')).importMsPub(data, name); warnings.push(...r.warnings); return r.pub; }
+      case 'indd': case 'qxp': case 'pmd': { const r = await (await import('./legacyLayout')).importLegacyLayout(data, name, format); warnings.push(...r.warnings); return r.pub; }
+      case 'mif': { const r = (await import('./mif')).importMif((await import('./xml')).decodeXml(data), name); warnings.push(...r.warnings); return r.pub; }
+      case 'xtg': { const r = (await import('./xpressTags')).importXpressTags(data, name); warnings.push(...r.warnings); return r.pub; }
       case 'svg': return (await import('./images')).publicationFromSvg(data, name);
       case 'image': return (await import('./images')).publicationFromImage(data, name);
       case 'txt': case 'md': case 'rtf': case 'docx': case 'html': {

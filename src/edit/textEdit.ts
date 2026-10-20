@@ -92,6 +92,8 @@ export class TextEditor {
       if (bt) { d.dataset.bullet = bt; d.style.setProperty('--qp-hang', `${Math.max(0, -indent)}px`); }
       for (const r of p.runs) {
         if (r.br) { d.appendChild(document.createElement('br')); continue; }
+        if (r.anchor) { d.appendChild(this.anchorSpan(r)); continue; }
+        if (r.footnote) { d.appendChild(this.footnoteSpan(r)); continue; }
         if (!r.text) continue;
         const sp = document.createElement('span');
         sp.textContent = r.text;
@@ -107,6 +109,33 @@ export class TextEditor {
       this.root.appendChild(d);
     });
     if (sel) this.setRange(sel[0], sel[1]);
+  }
+
+  /** A non-editable placeholder the size of the anchored object, so the caret moves around it. */
+  private anchorSpan(r: Run): HTMLElement {
+    const sp = document.createElement('span');
+    const item = r.anchor ? this.app.pub.findItem({ items: this.app.pub.pages.flatMap((p) => p.items) }, r.anchor) || this.app.pub.data.masters.map((m) => this.app.pub.findItem(m, r.anchor!)).find(Boolean) : undefined;
+    sp.className = 'qp-anchor-ph';
+    sp.contentEditable = 'false';
+    sp.textContent = '\uFFFC';
+    sp.dataset.r = JSON.stringify({ anchor: r.anchor });
+    const inline = !item?.anchored || item.anchored.mode === 'inline';
+    const w = item && inline ? Math.max(4, item.w) : 6, h = item && inline ? Math.max(4, item.h) : 10;
+    sp.style.width = `${w}px`; sp.style.height = `${h}px`;
+    sp.title = item ? `${item.name || item.kind} (anchored${item.anchored?.mode && item.anchored.mode !== 'inline' ? `, ${item.anchored.mode}` : ''})` : 'Anchored object';
+    return sp;
+  }
+
+  /** A non-editable superscript reference; double-click opens the footnote. */
+  private footnoteSpan(r: Run): HTMLElement {
+    const sp = document.createElement('span');
+    sp.className = 'qp-fnref';
+    sp.contentEditable = 'false';
+    sp.textContent = r.text || '1';
+    sp.dataset.r = JSON.stringify({ footnote: r.footnote, ...runOverrides(r) });
+    sp.title = 'Footnote (double-click to edit)';
+    sp.addEventListener('dblclick', (e) => { e.preventDefault(); e.stopPropagation(); this.app.exec('text.editFootnote', r.footnote); });
+    return sp;
   }
 
   private styleSpan(sp: HTMLElement, r: RunProps, ov: RunProps): void {
@@ -347,6 +376,9 @@ export class TextEditor {
     return resolveRun(this.app.pub.data, base, p.end || {});
   }
 
+  /** The caret position (paragraph index and character offset). */
+  caretPos(): Pos | null { const r = this.getRange(); return r ? r[0] : null; }
+
   caretPara(): Partial<Paragraph> {
     const rng = this.getRange();
     const paras = this.read();
@@ -510,7 +542,7 @@ function sameProps(a: RunProps, b: RunProps): boolean {
 
 function pushRun(runs: Run[], r: Run): void {
   const last = runs[runs.length - 1];
-  if (last && !last.br && !r.br && !last.field && !r.field && sameProps(last, r)) last.text += r.text;
+  if (last && !last.br && !r.br && !last.field && !r.field && !last.anchor && !r.anchor && !last.footnote && !r.footnote && sameProps(last, r)) last.text += r.text;
   else runs.push(r);
 }
 

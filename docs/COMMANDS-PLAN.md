@@ -205,6 +205,9 @@ Pages, text, pictures, shapes, tables, fields, symbols and links.
 - `insert.sidebar` — Sidebar: A tinted box with its own text, that body text wraps around
 - `insert.toc` — Table of Contents: A contents frame built from the Heading 1–3 paragraphs across the pages, with page numbers *(inspired by Generated contents (Ventura Publisher, FrameMaker))*
 - `insert.textFrame` — Text Frame (Ctrl+Shift+t, t): Drag to draw a text frame; type into it, or link it to another frame so text flows between them
+- `insert.textOnPath` — Text on a Path: Text set along a line, an arc, a circle, a wave or a zigzag; or convert a shape with Text Path ▸ From Shape *(inspired by Text on a path (CorelDRAW, Illustrator, InDesign))*
+- `insert.inlinePicture` — Inline Picture: Place a picture in the text at the caret; it moves with the text like a character *(inspired by Inline graphics (PageMaker, Ventura Publisher))*
+- `insert.inlineFrame` — Inline Text Frame: A small text frame set in the text at the caret, moving with it
 
 ### Pictures
 
@@ -374,6 +377,19 @@ Text frames and flow, frame options, typography, paragraph flow and text tools.
 - `text.verticalAlign` — Vertical Alignment
 - `text.vertical` — Vertical Text: Rotate the text 90° inside the frame (for spines and tabs)
 
+### Notes
+
+- `text.insertFootnote` — Insert Footnote (Ctrl+Alt+f): A numbered reference at the caret, with its note set at the bottom of the column *(inspired by Footnotes (Ventura Publisher, FrameMaker, InDesign))*
+- `text.editFootnote` — Edit Footnote: Edit the text of the footnote at the caret
+- `text.deleteFootnote` — Delete Footnote: Remove the footnote at the caret and its reference
+- `text.nextFootnote` — Next Footnote
+- `text.prevFootnote` — Previous Footnote
+- `text.goToReference` — Go to Reference: Put the caret after the reference of a footnote
+- `text.footnoteOptions` — Footnote Options: numbering scheme, restart per story or page, separator rule, note style, placement
+- `text.footnotesToEndnotes` — Footnotes to Endnotes: Move the story's footnotes into a "Notes" section at its end, keeping the numbers as links
+- `text.endnotesToFootnotes` — Endnotes to Footnotes: Turn a "Notes" section made by Footnotes to Endnotes back into footnotes
+- `text.footnotesPane` — Footnotes: Every footnote of the publication: click one to go to its reference, edit its text in place
+
 ### Tools
 
 - `text.changeCase` — Change Case
@@ -441,6 +457,26 @@ Order, align, group, rotate, text wrap, size and position, layers.
 - `arrange.wrapSquare` — Wrap Around Bounding Box: Text keeps clear of the object's rectangle
 - `arrange.wrapTight` — Wrap Around Shape: Text follows the shape (and the picture's edges)
 - `arrange.wrapOffset` — Wrap Distance
+
+### Anchor
+
+- `arrange.anchorInline` — Anchor Inline: The selected object sits in the text like a character and moves with it; its line grows to hold it *(inspired by Inline graphics (PageMaker, Ventura, InDesign anchored objects))*
+- `arrange.anchorAbove` — Anchor Above Line: The selected object sits above the line it is anchored in and moves with the text
+- `arrange.anchorCustom` — Anchor at Offset: The selected object keeps its distance from a point in the text and moves when that text moves
+- `arrange.releaseAnchor` — Release Anchor: The object stays where it is and no longer moves with the text
+- `arrange.anchorOptions` — Anchor Options: position mode, inline alignment, horizontal alignment, offsets
+
+### Text Path
+
+- `path.fromShape` — From Shape: Set text along the outline of the selected shape, frame or line (the shape itself can stay underneath)
+- `path.editText` — Edit Path Text
+- `path.align` — Align on Path: start, center, end, or spread along the path
+- `path.offset` — Start Offset: Distance along the path before the text starts
+- `path.baseline` — Baseline Shift: Raise the text above the path (negative values put it below)
+- `path.flip` — Flip to Other Side: Set the text on the other side of the path, running the other way
+- `path.spacing` — Character Spacing
+- `path.showPath` — Show Path: Draw the path with the item's outline
+- `path.release` — Release to Text Frame: Put the text back into an ordinary text frame of the same size
 
 ### Size and Position
 
@@ -821,8 +857,6 @@ Page navigation (keyboard and status bar; not on a tab).
 
 These ids are reserved for later milestones (see [ROADMAP.md](ROADMAP.md)); they are not in the app yet.
 
-- `text.onPath` — Text on a path
-- `text.footnotes` — Footnotes that flow with their reference
 - `text.optMargin` — Optical margin alignment (hanging punctuation)
 - `fmt.openTypeFeatures` — OpenType feature switches beyond small caps and ligatures
 - `fmt.characterPalette` — Glyph palette from the font
@@ -832,9 +866,7 @@ These ids are reserved for later milestones (see [ROADMAP.md](ROADMAP.md)); they
 - `insert.qrCode` — QR code generation
 - `insert.barcode` — Barcodes
 - `insert.chart` — Charts from table data
-- `insert.footnote` — Footnote
 - `insert.crossReference` — Cross-reference to a heading or page
-- `insert.anchoredObject` — Objects anchored to text that move with it
 - `picture.clippingPath` — Clipping paths from picture alpha for tight wrap
 - `picture.colorProfile` — Color profile tagging
 - `shape.booleanOps` — Pathfinder union/subtract/intersect of shapes

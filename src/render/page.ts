@@ -3,11 +3,13 @@
  * thumbnails, print and the SVG, PNG and PDF exporters. Master items are drawn under page items.
  */
 import type { Pub } from '../model/pub';
-import type { Fill, Item, Line, Master, Page, PictureFrame, ShapeItem, TableItem, TextFrame, LineItem, Paragraph } from '../model/types';
+import type { Fill, Item, Line, Master, Page, PictureFrame, ShapeItem, TableItem, TextFrame, LineItem, Paragraph, PathTextItem } from '../model/types';
+import { DEFAULT_FOOTNOTE_OPTIONS } from '../model/types';
 import { colorHex, resolvePara, resolveRun } from '../model/styles';
-import { geometryPath } from '../model/geometry';
-import { frameBoxes, frameLines, layoutOptions, cssFamily } from './flow';
+import { geometryPath, scalePath } from '../model/geometry';
+import { frameBoxes, frameLines, layoutOptions, storyOptions, cssFamily, syncAnchors, anchorPointOf } from './flow';
 import { layoutStory, type LaidLine, type FlowBox, cssFont } from './text';
+import { pathTextLayout } from './pathText';
 import { escHtml } from '../util/sanitize';
 
 export type Owner = Page | Master;
@@ -52,6 +54,8 @@ export function pageSvg(pub: Pub, owner: Owner, opts: RenderOptions = {}): strin
   const pad = bleed;
   const pageIndex = opts.pageIndex ?? (isPage(owner) ? pub.pageIndex(owner.id) : -1);
   const ctx: Ctx = { pub, opts, defs: [], prefix: `p${(uid++ % 100000).toString(36)}`, pageIndex, owner, onPage: isPage(owner) };
+  // Objects anchored in text sit where the text puts them; lay out those stories before drawing.
+  if (!opts.items) syncAnchors(pub);
   const body: string[] = [];
   // Background
   const bg = isPage(owner) ? owner.bg : undefined;
@@ -214,9 +218,17 @@ export function itemSvg(ctx: Ctx & { ids?: boolean }, e: Item, owner: Owner, fro
     case 'line': inner = lineSvg(ctx, e); break;
     case 'table': inner = tableSvg(ctx, e); break;
     case 'group': inner = e.children.map((c) => itemSvg(ctx, c, owner, fromMaster)).join(''); break;
+    case 'pathText': inner = pathTextSvg(ctx, e); break;
   }
   const link = e.link && ctx.opts.mode !== 'edit' ? [`<a href="${escHtml(e.link)}">`, '</a>'] : ['', ''];
-  return `${link[0]}<g transform="${transformOf(e)}" class="qp-item qp-${e.kind}"${attrs}>${inner}</g>${link[1]}`;
+  let mark = '';
+  if (e.anchored && ctx.opts.mode === 'edit' && !fromMaster) {
+    // Anchor marker at the point on the line the object hangs from, and a dotted line to the object.
+    const ap = anchorPointOf(ctx.pub, e.id);
+    const ax = ap ? ap.x : e.x, ay = ap ? ap.y : e.y;
+    mark = `<g class="qp-anchor-mark" pointer-events="none">${ap && (Math.abs(ap.x - e.x) > 2 || Math.abs(ap.y - e.y) > 2) ? `<path d="M${n(ax)} ${n(ay)} L${n(e.x)} ${n(e.y)}" stroke="#1e88e5" stroke-width="0.5" stroke-dasharray="2 2" vector-effect="non-scaling-stroke"/>` : ''}<g transform="translate(${n(ax - 4)} ${n(ay - 9)})"><rect width="8" height="8" rx="1.5" fill="#1e88e5"/><path d="M4 1.5 V6.5 M2 4 H6 M1.8 5.2 Q4 7.4 6.2 5.2" stroke="#fff" stroke-width="0.9" fill="none"/></g></g>`;
+  }
+  return `${link[0]}<g transform="${transformOf(e)}" class="qp-item qp-${e.kind}${e.anchored ? ' qp-anchored' : ''}"${attrs}>${inner}</g>${link[1]}${mark}`;
 }
 
 function frameFillLine(ctx: Ctx, e: Item): { fill: Fill | undefined; line: Line | undefined } {
@@ -236,18 +248,21 @@ function textFrameSvg(ctx: Ctx, f: TextFrame, owner: Owner, fromMaster: boolean)
   // Lines: frames on the page use the story's cached flow; master frames shown on a page are laid out for that page.
   let lines: LaidLine[];
   let overset = false;
+  let separators: { x: number; y: number; w: number }[] = [];
   if (fromMaster && ctx.onPage) {
     const story = pub.story(f.story);
     const boxes = frameBoxes(f, owner, ctx.pageIndex, pub);
-    const r = story ? layoutStory(story.paras, layoutOptions(pub, boxes, { anchor: (f.columns || 1) === 1 ? f.anchor : undefined })) : { lines: [], overset: undefined };
-    lines = r.lines; overset = !!r.overset;
+    const r = story ? layoutStory(story.paras, storyOptions(pub, story, boxes, { anchor: (f.columns || 1) === 1 ? f.anchor : undefined })) : { lines: [], overset: undefined, separators: [] };
+    lines = r.lines; overset = !!r.overset; separators = r.separators;
   } else {
     const fl = frameLines(pub, f);
-    lines = fl.lines; overset = fl.overset;
+    lines = fl.lines; overset = fl.overset; separators = fl.separators;
   }
   const clipId = `${ctx.prefix}c${ctx.defs.length}`;
   ctx.defs.push(`<clipPath id="${clipId}"><path d="${d}"/></clipPath>`);
-  out += `<g clip-path="url(#${clipId})" transform="translate(${n(-f.x)} ${n(-f.y)})">${linesSvg(ctx, lines)}</g>`;
+  const sepW = (pub.data.footnoteOptions || DEFAULT_FOOTNOTE_OPTIONS).separator.width;
+  const seps = separators.filter((sp) => sp.w > 0 && sepW > 0).map((sp) => `<path d="M${n(sp.x)} ${n(sp.y)} H${n(sp.x + sp.w)}" stroke="${colorHex(pub.data, 'Black')}" stroke-width="${n(sepW)}" class="qp-fn-sep"/>`).join('');
+  out += `<g clip-path="url(#${clipId})" transform="translate(${n(-f.x)} ${n(-f.y)})">${linesSvg(ctx, lines)}${seps}</g>`;
   if (ctx.opts.mode === 'edit') {
     if (ctx.opts.frameEdges !== false) out += `<path d="${d}" fill="none" stroke="#9aa0a6" stroke-width="0.5" stroke-dasharray="2 2" vector-effect="non-scaling-stroke" class="qp-frame-edge"/>`;
     if (overset) out += `<g class="qp-overset" transform="translate(${n(f.w - 10)} ${n(f.h - 10)})"><rect width="9" height="9" fill="#fff" stroke="#d32f2f" stroke-width="0.8"/><path d="M4.5 2 V7 M2 4.5 H7" stroke="#d32f2f" stroke-width="1.2"/></g>`;
@@ -283,6 +298,32 @@ export function linesSvg(ctx: Ctx, lines: LaidLine[]): string {
     if (spans.length) parts.push(`<text y="${n(l.y)}" xml:space="preserve" data-line="${l.para}:${l.start}">${spans.join('')}</text>`);
     out.push(parts.join(''));
   }
+  return out.join('');
+}
+
+/** Text on a path: one positioned <text> per glyph (the PDF writer places the same glyphs), plus the path when shown. */
+function pathTextSvg(ctx: Ctx, e: PathTextItem): string {
+  const pub = ctx.pub;
+  const d = pub.data;
+  const out: string[] = [];
+  const sx = e.path.w ? e.w / e.path.w : 1, sy = e.path.h ? e.h / e.path.h : 1;
+  const local = scalePath(e.path.d, sx, sy);
+  const { line } = frameFillLine(ctx, e);
+  const stroke = strokeAttrs(ctx, line);
+  if (e.showPath && !stroke.includes('stroke="none"')) out.push(`<path d="${local}" fill="none"${stroke}/>`);
+  else if (ctx.opts.mode === 'edit') out.push(`<path d="${local}" fill="none" stroke="#9aa0a6" stroke-width="0.5" stroke-dasharray="2 2" vector-effect="non-scaling-stroke" class="qp-frame-edge"/>`);
+  // Glyphs in the item's local box (the group's transform adds the position, rotation and flips).
+  const r = pathTextLayout({ ...e, x: 0, y: 0, rot: undefined, flipH: undefined, flipV: undefined }, layoutOptions(pub, []));
+  const glyphs: string[] = [];
+  for (const g of r.glyphs) {
+    const st = g.style;
+    const deco = [st.u ? 'underline' : '', st.strike ? 'line-through' : ''].filter(Boolean).join(' ');
+    const style = `font-family:${escHtml(cssFamily(g.font))};font-size:${n(g.size)}px;${st.b ? 'font-weight:bold;' : ''}${st.i ? 'font-style:italic;' : ''}${deco ? `text-decoration:${deco};` : ''}${st.caps === 'small' ? 'font-variant:small-caps;' : ''}`;
+    glyphs.push(`<text transform="translate(${n(g.x)} ${n(g.y)}) rotate(${n(g.angle)})" text-anchor="middle" fill="${colorHex(d, st.color)}" style="${style}" data-glyph="1">${escHtml(g.ch)}</text>`);
+  }
+  out.push(`<g class="qp-pathtext-glyphs">${glyphs.join('')}</g>`);
+  if (ctx.opts.mode === 'edit' && !r.glyphs.length) out.push(`<text x="4" y="${n(Math.min(e.h, 14))}" font-size="9" fill="#9aa0a6" font-family="system-ui, sans-serif" class="qp-prompt">Double-click to type on the path</text>`);
+  if (ctx.opts.mode === 'edit' && r.overflow) out.push(`<g class="qp-overset" transform="translate(${n(e.w - 10)} ${n(e.h - 10)})"><rect width="9" height="9" fill="#fff" stroke="#d32f2f" stroke-width="0.8"/><path d="M4.5 2 V7 M2 4.5 H7" stroke="#d32f2f" stroke-width="1.2"/></g>`);
   return out.join('');
 }
 

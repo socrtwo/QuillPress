@@ -16,7 +16,9 @@ const { pathToFileURL, fileURLToPath } = require('node:url');
 const DIST = path.join(__dirname, '..', 'dist');
 const SCHEME = 'app';
 const ORIGIN = `${SCHEME}://quillpress`;
-const OPENABLE = ['qpp', 'qppe', 'sla', 'json', 'svg', 'md', 'markdown', 'txt', 'rtf', 'docx', 'html', 'htm', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff'];
+const OPENABLE = ['qpp', 'qppe', 'sla', 'json', 'svg', 'md', 'markdown', 'txt', 'rtf', 'docx', 'html', 'htm', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff',
+  // other page layout programs' files (read by content; see docs/FORMATS.md)
+  'idml', 'indd', 'indt', 'pub', 'qxp', 'qxd', 'qxt', 'pmd', 'p65', 'pm6', 'pmt', 'mif', 'xtg'];
 /** Documents, slides, sheets and mail the app can place or hand to a sibling Quill app (never programs or scripts). */
 const DOCUMENTS = ['docx', 'docm', 'dotx', 'doc', 'odt', 'fodt', 'rtf', 'pdf', 'html', 'htm', 'pptx', 'odp', 'xlsx', 'ods', 'csv', 'eml', 'qsp', 'qpd', 'qgs', 'qlw', 'qfo'];
 

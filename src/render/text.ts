@@ -8,7 +8,8 @@
  * in order). Each box may carry exclusion rectangles (objects with text wrap) that shorten the lines
  * passing through them. Lines that do not fit in the last box are overset.
  */
-import type { Bullet, NumScheme, Paragraph, RunProps, ParaProps, Tab } from '../model/types';
+import type { Bullet, NumScheme, Paragraph, Run, RunProps, ParaProps, Tab, FootnoteOptions } from '../model/types';
+import { DEFAULT_FOOTNOTE_OPTIONS } from '../model/types';
 
 export interface MeasureFn { (text: string, font: string): number }
 
@@ -80,7 +81,14 @@ export interface Seg {
   off: number;
   /** Drop cap glyph: the number of lines it spans. */
   drop?: number;
+  /** An anchored object's place on the line (the segment has no text; w is the object's width). */
+  anchor?: string;
+  /** A footnote reference (the text is its label). */
+  footnote?: string;
 }
+
+/** What the engine needs to know about an anchored object. */
+export interface AnchoredInfo { w: number; h: number; mode: 'inline' | 'above' | 'custom'; dx?: number; dy?: number; align?: 'l' | 'ctr' | 'r'; valign?: 'baseline' | 'ctr' | 'top' }
 
 export interface LaidLine {
   box: number;
@@ -100,6 +108,10 @@ export interface LaidLine {
   /** Character offsets [start, end) of the paragraph text on this line. */
   start: number;
   end: number;
+  /** Objects anchored on this line: computed top-left (x, y) and the anchor point (ax, ay) on the line, page coordinates. */
+  anchors?: { id: string; x: number; y: number; ax: number; ay: number }[];
+  /** A line of footnote text at the bottom of the box (para indexes the footnote's paragraphs). */
+  footnote?: boolean;
 }
 
 export interface LayoutResult {
@@ -110,6 +122,10 @@ export interface LayoutResult {
   perBox: number[];
   /** Height used in the last box that received text. */
   used: number;
+  /** Footnote separator rules (page coordinates). */
+  separators: { box: number; x: number; y: number; w: number }[];
+  /** The label given to each footnote referenced. */
+  footnoteLabels?: Record<string, string>;
 }
 
 export interface ResolvedParaStyle { props: ParaProps; run: RunProps }
@@ -133,6 +149,11 @@ export interface LayoutOptions {
   unbounded?: boolean;
   /** Vertical anchoring inside the last used box. */
   anchor?: 't' | 'ctr' | 'b' | 'just';
+  /** Size and mode of an anchored item (undefined: the anchor is ignored). */
+  anchoredItem?: (id: string) => AnchoredInfo | undefined;
+  /** Paragraphs of a footnote by id. */
+  footnote?: (id: string) => Paragraph[] | undefined;
+  footnoteOptions?: FootnoteOptions;
 }
 
 export const cssFont = (st: RunProps, size: number, family: string) => `${st.i ? 'italic ' : ''}${st.b ? 'bold ' : ''}${Math.max(0.5, size)}px "${family}"`;
@@ -188,7 +209,7 @@ export function hyphenPoints(word: string): number[] {
 
 // ------------------------------------------------------------------------------------------
 
-type Tok = { text: string; style: RunProps; size: number; font: string; css: string; run: number; off: number; br?: boolean; tab?: boolean; space: boolean; w: number };
+type Tok = { text: string; style: RunProps; size: number; font: string; css: string; run: number; off: number; br?: boolean; tab?: boolean; space: boolean; w: number; anchor?: AnchoredInfo & { id: string }; footnote?: string };
 
 function stripUndef<T extends object>(o: T): Partial<T> {
   const r: any = {};
@@ -212,8 +233,29 @@ function freeRanges(box: FlowBox, y0: number, y1: number): [number, number][] {
   return ranges.filter(([a, b]) => b - a > 8);
 }
 
+const FOOTNOTE_SYMBOLS = ['*', '†', '‡', '§', '‖', '¶'];
+
+/** The reference label of the n-th footnote (1-based) under a scheme. */
+export function footnoteLabel(n: number, scheme: FootnoteOptions['scheme']): string {
+  if (scheme === 'symbols') { const k = Math.max(1, n) - 1; return FOOTNOTE_SYMBOLS[k % 6].repeat(Math.floor(k / 6) + 1); }
+  return formatNumber(n, scheme);
+}
+
+/** The footnote's paragraphs with the reference label set in front of the first one. */
+function labeledFootnote(paras: Paragraph[], label: string, style: string): Paragraph[] {
+  const out = paras.map((p, i) => ({ ...p, style: p.style || style, runs: i === 0 ? [{ text: label, cstyle: 'Footnote Reference', baseline: 33 } as Run, { text: ' ' } as Run, ...p.runs] : [...p.runs] }));
+  return out.length ? out : [{ style, runs: [{ text: label, cstyle: 'Footnote Reference', baseline: 33 }] }];
+}
+
 /**
  * Lays paragraphs into the boxes. Returns the lines (page coordinates) and where the text overset.
+ *
+ * Anchored objects: a run with `anchor` is an inline token as wide as the object (its line grows to
+ * hold it) or a zero-width marker for objects above the line or at a custom offset; each line lists
+ * the computed top-left of its objects in `anchors`. Footnotes: a run with `footnote` is numbered in
+ * reading order (per story or per page) and the footnote's text is laid out at the bottom of the
+ * column holding the reference; the column's bottom is reserved for it, so the reference and its
+ * note always share a column. Footnote lines carry `footnote: true`.
  */
 export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult {
   const m = o.measure || measure;
@@ -228,9 +270,37 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
   let overset: LayoutResult['overset'];
   let prevStyleKey = '';
   const boxBottom = () => (o.unbounded && bi === o.boxes.length - 1 ? Infinity : box.y + box.h);
+  // Footnotes: space reserved at the bottom of each box, the laid footnote lines waiting for it, numbering.
+  const fnOpts = o.footnoteOptions || DEFAULT_FOOTNOTE_OPTIONS;
+  const sepTotal = fnOpts.separator.space + 2;
+  const reserved: number[] = o.boxes.map(() => 0);
+  const fnPending: LaidLine[][] = o.boxes.map(() => []);
+  const separators: LayoutResult['separators'] = [];
+  const footnoteLabels: Record<string, string> = {};
+  let fnCount = 0;
+  let fnPage = -2;
+  /** The box whose bottom receives the footnotes referenced from box k. */
+  const fnTarget = (k: number): number => {
+    if (fnOpts.placement !== 'frame') return k;
+    let t = k;
+    while (t + 1 < o.boxes.length && o.boxes[t + 1].frame === o.boxes[k].frame) t++;
+    return t;
+  };
+  /** Writes the footnote lines of box k at its bottom (or after the text in an unbounded box). */
+  const flushFootnotes = (k: number, yEnd?: number) => {
+    const pend = fnPending[k];
+    if (!pend.length) return;
+    const b = o.boxes[k];
+    const top = yEnd != null ? yEnd : b.y + b.h - reserved[k];
+    separators.push({ box: k, x: b.x, y: top + fnOpts.separator.space * 0.5, w: b.w * Math.max(0, Math.min(1, fnOpts.separator.length)) });
+    for (const l of pend) { l.y += top + sepTotal; lines.push(l); }
+    if (yEnd != null) y = top + reserved[k];
+    fnPending[k] = [];
+  };
 
   const nextBox = (): boolean => {
     if (bi + 1 >= o.boxes.length) return false;
+    flushFootnotes(bi);
     bi++;
     box = o.boxes[bi];
     y = box.y;
@@ -262,6 +332,18 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
       const fam = fontOf(s.font);
       const css = cssFont(s, size, fam);
       if (r.br) { toks.push({ text: '', style: s, size, font: fam, css, run: ri, off, br: true, space: false, w: 0 }); off += 1; return; }
+      if (r.anchor) {
+        const info = o.anchoredItem?.(r.anchor);
+        if (info) toks.push({ text: '￼', style: s, size, font: fam, css, run: ri, off, space: false, w: info.mode === 'inline' ? info.w : 0, anchor: { ...info, id: r.anchor } });
+        off += r.text.length;
+        return;
+      }
+      if (r.footnote) {
+        const text = r.text || '1';
+        toks.push({ text, style: s, size, font: fam, css, run: ri, off, space: false, w: m(text, css), footnote: r.footnote });
+        off += r.text.length;
+        return;
+      }
       let text = r.field && o.fields && box ? o.fields(r.field, box, r.varName) : r.text;
       if (r.field && !text) text = r.text;
       if (s.caps === 'all') text = text.toUpperCase();
@@ -279,7 +361,7 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
     });
     const hasText = toks.some((t) => !t.space && !t.br && !t.tab);
     const bText = hasText && bullet ? bulletText(bullet, Math.max(0, (counters.get(key) || 1) - 1)) : '';
-    const firstTok = toks.find((t) => !t.br && !t.space);
+    const firstTok = toks.find((t) => !t.br && !t.space && !t.anchor && !t.footnote);
     const firstSize = firstTok?.size ?? endSize;
     const bSize = (bullet?.size ? bullet.size / 100 : 1) * firstSize;
     const bFont = fontOf(bullet?.font || baseRun.font);
@@ -318,27 +400,62 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
     // Space before (not at the top of a box).
     if (y > box.y + 0.01) y += spBefore;
 
+    /** Line metrics: natural height from the leading, and the space above/below the baseline once anchored objects are counted. */
     const lineGeom = (fst: boolean, ln: number) => {
-      const sizes = lineToks.filter((t) => !t.br).map((t) => t.size);
+      const sizes = lineToks.filter((t) => !t.br && !t.anchor).map((t) => t.size);
       const maxSize = sizes.length ? Math.max(...sizes) : endSize;
       const natural = maxSize * leadingPct;
       const height = Math.max(1, leadingPt || natural);
       const ascent = maxSize * 0.92;
-      return { maxSize, height, ascent, fst, ln };
+      let above = height * 0.8, below = height * 0.2;
+      for (const t of lineToks) {
+        const a = t.anchor;
+        if (!a) continue;
+        if (a.mode === 'inline') {
+          const va = a.valign || 'baseline';
+          if (va === 'baseline') above = Math.max(above, a.h + 1);
+          else if (va === 'ctr') { const c = maxSize * 0.33; above = Math.max(above, a.h / 2 + c + 1); below = Math.max(below, a.h / 2 - c + 1); }
+          else { above = Math.max(above, ascent); below = Math.max(below, a.h - ascent + 1); }
+        } else if (a.mode === 'above') above = Math.max(above, height * 0.8 + a.h + (a.dy ?? 4));
+      }
+      return { maxSize, height, ascent, above, below, fst, ln };
     };
     const place = (last: boolean): 'ok' | 'moved' | 'overset' => {
       while (lineToks.length && lineToks[lineToks.length - 1].space) lineToks.pop();
       const g = lineGeom(first, lineNo);
-      let baseline = y + g.height * 0.8;
+      let baseline = y + g.above;
       if (st.gridAlign && o.grid && o.grid.step > 0) {
         const k = Math.ceil((baseline - o.grid.start) / o.grid.step);
         baseline = o.grid.start + Math.max(0, k) * o.grid.step;
       }
-      const bottom = baseline + g.height * 0.25;
-      if (bottom > boxBottom() + 0.01 && !(o.unbounded && bi === o.boxes.length - 1)) {
+      const bottom = baseline + Math.max(g.below, g.height * 0.25);
+      // Footnotes referenced on this line: number them and lay out their text at the column width.
+      const fnToks = lineToks.filter((t) => t.footnote);
+      const target = fnTarget(bi);
+      let fnCountNew = fnCount, fnPageNew = fnPage, fnH = 0;
+      const fnLines: LaidLine[] = [];
+      const labels: [Tok, string][] = [];
+      if (fnToks.length) {
+        if (fnOpts.restart === 'page' && (box.page ?? -1) !== fnPageNew) { fnCountNew = 0; fnPageNew = box.page ?? -1; }
+        for (const t of fnToks) {
+          fnCountNew++;
+          const label = footnoteLabel(fnCountNew, fnOpts.scheme);
+          labels.push([t, label]);
+          const fp = o.footnote?.(t.footnote!);
+          if (!fp) continue;
+          const tb = o.boxes[target];
+          const sub = layoutStory(labeledFootnote(fp, label, fnOpts.style), { ...o, boxes: [{ frame: tb.frame, col: tb.col, x: tb.x, y: 0, w: tb.w, h: 1e6, page: tb.page }], unbounded: true, anchor: undefined, grid: undefined, footnote: undefined, anchoredItem: undefined });
+          for (const l of sub.lines) { l.y += fnH; l.box = target; l.footnote = true; fnLines.push(l); }
+          fnH += sub.used;
+        }
+      }
+      const newReserved = fnH ? (reserved[target] || sepTotal) + fnH : reserved[target];
+      const myReserved = target === bi ? newReserved : reserved[bi];
+      if (bottom > boxBottom() - myReserved + 0.01 && !(o.unbounded && bi === o.boxes.length - 1)) {
         // The line does not fit: move the whole paragraph if it has only started, else just this line.
         return 'moved';
       }
+      for (const [t, label] of labels) { t.text = label; t.w = m(label, t.css); }
       let x0 = box.x + (first ? firstIndent : marL) + (lineNo < dropLines ? dropW : 0);
       let avail = box.w - (first ? firstIndent : marL) - marR - (lineNo < dropLines ? dropW : 0);
       // Exclusions: use the widest free range crossing the line band.
@@ -362,9 +479,8 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
         }
         const w = t.w;
         if (t.space) spaces++;
-        const last2 = segs[segs.length - 1];
-        if (last2 && last2.run === t.run && last2.css === t.css && !t.space && !last2.text.endsWith(' ') && lineToks.indexOf(t) > 0 && false) { last2.text += t.text; last2.w += w; }
-        else segs.push({ text: t.text, x, w, style: t.style, size: t.size, font: t.font, css: t.css, run: t.run, off: t.off });
+        if (t.anchor) segs.push({ text: '', x, w, style: t.style, size: t.size, font: t.font, css: t.css, run: t.run, off: t.off, anchor: t.anchor.id });
+        else segs.push({ text: t.text, x, w, style: t.style, size: t.size, font: t.font, css: t.css, run: t.run, off: t.off, ...(t.footnote ? { footnote: t.footnote } : {}) });
         x += w;
       }
       let width = x;
@@ -380,14 +496,34 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
       const start = lineToks.length ? lineToks[0].off : (segs[0]?.off ?? 0);
       const endTok = lineToks[lineToks.length - 1];
       const end = endTok ? endTok.off + endTok.text.length + (endTok.br ? 1 : 0) : start;
-      const ll: LaidLine = { box: bi, segs, y: baseline, x: left, width, height: g.height, ascent: g.ascent, para: pi, first, last, align, start, end };
+      const ll: LaidLine = { box: bi, segs, y: baseline, x: left, width, height: g.above + g.below, ascent: g.ascent, para: pi, first, last, align, start, end };
       if (first && bText) ll.bullet = { text: bText, x: box.x + bX, size: bSize, font: bFont, css: bCss, color: bullet?.color || firstTok?.style.color || baseRun.color };
       if (first && dropSeg) { dropSeg.x = box.x + (first ? marL : marL) - left; ll.segs.unshift({ ...dropSeg, x: (box.x + marL) - left }); }
+      // Anchored objects: where each one goes, from the token's place on the line.
+      for (const t of lineToks) {
+        const a = t.anchor;
+        if (!a) continue;
+        const seg = segs.find((s) => s.anchor === a.id);
+        const ax = left + (seg?.x ?? 0), ay = baseline;
+        let px = ax, py = baseline - a.h;
+        if (a.mode === 'inline') {
+          const va = a.valign || 'baseline';
+          py = va === 'baseline' ? baseline - a.h : va === 'ctr' ? baseline - g.maxSize * 0.33 - a.h / 2 : baseline - g.ascent;
+        } else if (a.mode === 'above') {
+          const al = a.align || 'l';
+          px = x0 + (al === 'ctr' ? (avail - a.w) / 2 : al === 'r' ? avail - a.w : 0) + (a.dx ?? 0);
+          py = baseline - g.above;
+        } else { px = ax + (a.dx ?? 0); py = baseline + (a.dy ?? 0); }
+        (ll.anchors ||= []).push({ id: a.id, x: px, y: py, ax, ay });
+      }
       lines.push(ll);
       perBox[bi]++;
-      y = baseline + g.height * 0.2;
+      y = baseline + g.below;
       lastY = y;
       if (paraStartedInBox < 0) paraStartedInBox = bi;
+      if (fnH) { reserved[target] = newReserved; fnPending[target].push(...fnLines); }
+      for (const [t, label] of labels) footnoteLabels[t.footnote!] = label;
+      fnCount = fnCountNew; fnPage = fnPageNew;
       lineToks = [];
       first = false;
       lineNo++;
@@ -397,10 +533,10 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
     // Measure helpers for the available width of the next line (before placing it).
     const availFor = (fst: boolean, ln: number): number => {
       const g = lineGeom(fst, ln);
-      const baseline = y + g.height * 0.8;
+      const baseline = y + g.above;
       let x0 = box.x + (fst ? firstIndent : marL) + (ln < dropLines ? dropW : 0);
       let avail = box.w - (fst ? firstIndent : marL) - marR - (ln < dropLines ? dropW : 0);
-      const free = freeRanges(box, baseline - g.ascent, baseline + g.height * 0.25);
+      const free = freeRanges(box, baseline - g.ascent, baseline + Math.max(g.below, g.height * 0.25));
       if (free.length && box.excl?.length) {
         const best = free.reduce((a, b) => (b[1] - b[0] > a[1] - a[0] ? b : a));
         const left = Math.max(x0, best[0]);
@@ -437,7 +573,7 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
       const w = t.w;
       if (!t.space && lineW + w > avail + 0.01 && lineToks.some((x) => !x.space && !x.tab)) {
         // Try to hyphenate the word so part of it stays on this line.
-        if (st.hyphenate !== false && t.text.length >= 6) {
+        if (st.hyphenate !== false && t.text.length >= 6 && !t.footnote) {
           const pts = hyphenPoints(t.text);
           let best = -1;
           for (const pt of pts) { const hw = m(t.text.slice(0, pt) + '-', t.css); if (lineW + hw <= avail) best = pt; else break; }
@@ -455,7 +591,7 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
       }
       if (!t.space || lineToks.some((x) => !x.space)) {
         const avail2 = availFor(first, lineNo);
-        if (!t.space && w > avail2 + 0.01) {
+        if (!t.space && !t.anchor && !t.footnote && w > avail2 + 0.01) {
           // A word longer than the line is broken by characters.
           let chunk = '';
           let coff = t.off;
@@ -481,16 +617,20 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
     void paraLineIdx;
   }
 
+  // Footnotes of the boxes still holding them (the last box used, and any box the paragraphs skipped).
+  if (box) for (let k = 0; k < o.boxes.length; k++) flushFootnotes(k, o.unbounded && k === o.boxes.length - 1 && k === bi ? y : undefined);
   const used = box ? Math.max(0, y - box.y) : 0;
   // Vertical anchoring inside a single box (frames with one column): shift lines down.
   if (o.anchor && o.anchor !== 't' && o.boxes.length === 1 && !overset && lines.length) {
     const b = o.boxes[0];
-    const extra = Math.max(0, b.h - used);
-    if (o.anchor === 'ctr') for (const l of lines) l.y += extra / 2;
-    else if (o.anchor === 'b') for (const l of lines) l.y += extra;
-    else if (o.anchor === 'just' && lines.length > 1) { const gap = extra / (lines.length - 1); lines.forEach((l, i) => { l.y += gap * i; }); }
+    const extra = Math.max(0, b.h - used - reserved[0]);
+    const body = lines.filter((l) => !l.footnote);
+    if (o.anchor === 'ctr') for (const l of body) l.y += extra / 2;
+    else if (o.anchor === 'b') for (const l of body) l.y += extra;
+    else if (o.anchor === 'just' && body.length > 1) { const gap = extra / (body.length - 1); body.forEach((l, i) => { l.y += gap * i; }); }
+    for (const l of lines) if (l.anchors) for (const a of l.anchors) { const d = l.y - a.ay; a.y += d; a.ay = l.y; }
   }
-  return { lines, overset, perBox, used };
+  return { lines, overset, perBox, used, separators, footnoteLabels };
 }
 
 /** Plain-text words count. */

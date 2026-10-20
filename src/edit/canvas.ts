@@ -147,7 +147,7 @@ export class Canvas {
     for (const id of this.selection) {
       const e = o.items.find((x) => x.id === id)!;
       const b = boxOf(e);
-      const frame = h('div', { class: 'qp-sel' + (this.editor?.frame.id === id ? ' qp-sel-editing' : '') + (e.locked ? ' qp-sel-locked' : ''), 'data-sel': id });
+      const frame = h('div', { class: 'qp-sel' + (this.editor?.frame.id === id ? ' qp-sel-editing' : '') + (e.locked ? ' qp-sel-locked' : '') + (e.anchored ? ' qp-sel-anchored' : ''), 'data-sel': id });
       Object.assign(frame.style, { left: `${b.x + this.pad}px`, top: `${b.y + this.pad}px`, width: `${b.w}px`, height: `${b.h}px`, transform: b.rot ? `rotate(${b.rot}deg)` : '' });
       frame.style.setProperty('--qp-inv', String(1 / this.zoom));
       if (single && !e.locked && !this.editor) {
@@ -197,7 +197,7 @@ export class Canvas {
     if (p) for (let i = o.items.length - 1; i >= 0; i--) {
       const e = o.items[i];
       if (lockedLayer(this.app, e) || e.hidden) continue;
-      if (p.x >= e.x && p.x <= e.x + e.w && p.y >= e.y && p.y <= e.y + e.h && (e.kind === 'text' || e.kind === 'picture')) return e;
+      if (p.x >= e.x && p.x <= e.x + e.w && p.y >= e.y && p.y <= e.y + e.h && (e.kind === 'text' || e.kind === 'picture' || e.kind === 'pathText')) return e;
     }
     return undefined;
   }
@@ -355,9 +355,23 @@ export class Canvas {
       const pv = this.preview;
       this.preview = null;
       this.showGuides([]);
+      let converted = false;
       edit(this.app, d.kind === 'move' ? 'Move' : d.kind === 'resize' ? 'Resize' : 'Rotate', (own) => {
-        for (const [id, b] of pv) { const el = own.items.find((q) => q.id === id); if (el) setBox(el, b); }
+        for (const [id, b] of pv) {
+          const el = own.items.find((q) => q.id === id);
+          if (!el) continue;
+          if (el.anchored && d.kind === 'move' && b.x != null && b.y != null) {
+            // An anchored object's position is derived from the text: dragging changes its offset from the anchor.
+            const a = el.anchored;
+            if (a.mode !== 'custom') { a.mode = 'custom'; a.dx = 0; a.dy = 0; converted = true; }
+            a.dx = Math.round(((a.dx || 0) + (b.x - el.x)) * 100) / 100;
+            a.dy = Math.round(((a.dy || 0) + (b.y - el.y)) * 100) / 100;
+            continue;
+          }
+          setBox(el, b);
+        }
       });
+      if (converted) toast('The object now keeps this offset from its anchor in the text (Arrange ▸ Anchor Options to change it).', { ms: 5000 });
       return;
     }
     if (d.kind === 'move' || d.kind === 'resize' || d.kind === 'rotate') { this.preview = null; this.showGuides([]); this.render(); return; }
@@ -431,6 +445,7 @@ export class Canvas {
     const hit = this.hit(e.target, this.pt(e));
     if (!hit) return;
     if (hit.kind === 'text') this.editText(hit.id);
+    else if (hit.kind === 'pathText') this.app.exec('path.editText');
     else if (hit.kind === 'table') this.app.exec('table.editCells');
     else if (hit.kind === 'picture') this.app.exec(hit.media ? 'picture.fitting' : 'picture.place');
     else if (hit.kind === 'group') this.app.exec('arrange.ungroup');
@@ -470,12 +485,17 @@ export class Canvas {
     const before = JSON.stringify(story?.paras || []);
     if (story && JSON.stringify(paras) !== before) {
       const frames = pub.chainOf(story.id);
+      // Anchors and footnote references whose placeholder was deleted release their object or note.
+      const refs = (ps: typeof paras, k: 'anchor' | 'footnote') => new Set(ps.flatMap((p) => p.runs.map((r) => r[k]).filter(Boolean) as string[]));
+      const lostAnchors = [...refs(story.paras, 'anchor')].filter((id) => !refs(paras, 'anchor').has(id));
+      const lostNotes = [...refs(story.paras, 'footnote')].filter((id) => !refs(paras, 'footnote').has(id));
       const pages = [...new Set(frames.map((f) => pub.pageOfItem(f.id)?.id).filter(Boolean))] as string[];
       pub.transact('Typing', () => {
         const s = pub.story(story.id);
-        if (s) s.paras = paras;
+        if (s) { s.paras = paras; if (lostNotes.length && s.footnotes) s.footnotes = s.footnotes.filter((f) => !lostNotes.includes(f.id)); }
+        for (const id of lostAnchors) { const e = pub.ownerOfItem(id) && pub.findItem(pub.ownerOfItem(id)!, id); if (e) delete e.anchored; }
         for (const f of frames) if (f.autosize === 'height') fitFrameHeight(this.app, f);
-      }, pages.length && !this.app.tab.masterTarget ? pages : undefined);
+      }, pages.length && !this.app.tab.masterTarget && !lostAnchors.length ? pages : undefined);
     } else { this.renderedKey = ''; this.render(); }
     this.app.refresh();
   }
@@ -504,7 +524,7 @@ export class Canvas {
       if (k === 'ArrowUp') { e.preventDefault(); nudge(app, 0, -step); return; }
       if (k === 'ArrowDown') { e.preventDefault(); nudge(app, 0, step); return; }
       if (k === 'Delete' || k === 'Backspace') { e.preventDefault(); deleteSelection(app); return; }
-      if (k === 'Enter' || k === 'F2') { e.preventDefault(); const el = app.selected[0]; if (el?.kind === 'text') this.editText(el.id, true); return; }
+      if (k === 'Enter' || k === 'F2') { e.preventDefault(); const el = app.selected[0]; if (el?.kind === 'text') this.editText(el.id, true); else if (el?.kind === 'pathText') app.exec('path.editText'); return; }
       if (k === 'Tab') { e.preventDefault(); this.cycle(e.shiftKey ? -1 : 1); return; }
       if (k.length === 1 && this.selection.length === 1 && !/\s/.test(k)) {
         const el = app.selected[0];

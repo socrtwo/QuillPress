@@ -293,10 +293,13 @@ export async function onBackButton(cb: () => boolean): Promise<void> {
 }
 
 export const OPEN_ACCEPT = '.qpp,.qppe,.sla,.json,.svg,.txt,.md,.markdown,.rtf,.docx,.html,.htm'
+  // other page layout programs (docs/FORMATS.md)
+  + ',.idml,.indd,.indt,.pub,.qxp,.qxd,.qxt,.pmd,.p65,.pm6,.pmt,.mif,.xtg'
   // pictures open as a one-page publication
   + ',.png,.jpg,.jpeg,.gif,.webp,.bmp,.tif,.tiff';
 export const OPEN_MIMES = [
   'application/x-quillpress', 'application/x-quillpress-encrypted', 'application/x-scribus',
+  'application/vnd.adobe.indesign-idml-package', 'application/x-indesign', 'application/x-mspublisher', 'application/vnd.quark.quarkxpress', 'application/x-pagemaker', 'application/x-mif', 'text/x-xpress-tags',
   'application/json', 'image/svg+xml', 'text/markdown', 'text/plain', 'text/html', 'application/rtf', 'text/rtf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff', 'application/xml', 'text/xml', 'application/octet-stream', '*/*',

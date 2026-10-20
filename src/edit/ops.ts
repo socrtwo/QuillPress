@@ -3,7 +3,7 @@
  * master, inserting and removing items, geometry, text formatting on stories, linking frames, arranging.
  */
 import type { App } from '../app';
-import type { Item, Page, Master, Paragraph, ParaProps, RunProps, Story, TextFrame, Fill, Line, Run } from '../model/types';
+import type { Item, Page, Master, Paragraph, ParaProps, RunProps, Story, TextFrame, Fill, Line, Run, PathTextItem } from '../model/types';
 import { clone, newId, reId, emptyParas } from '../model/pub';
 import { toast } from '../ui/dialog';
 import { activeTextEditor } from './textEdit';
@@ -76,12 +76,16 @@ export function deleteSelection(app: App): void {
   const ids = app.tab.ui.selection;
   if (!ids.length) return;
   edit(app, 'Delete', (o) => {
-    const walk = (items: Item[]) => { for (let i = items.length - 1; i >= 0; i--) { if (ids.includes(items[i].id)) { unlinkFrame(app, items[i]); items.splice(i, 1); } else if (items[i].kind === 'group') walk((items[i] as any).children); } };
+    const gone: string[] = [];
+    const walk = (items: Item[]) => { for (let i = items.length - 1; i >= 0; i--) { if (ids.includes(items[i].id)) { unlinkFrame(app, items[i]); collectIds(items[i], gone); items.splice(i, 1); } else if (items[i].kind === 'group') walk((items[i] as any).children); } };
     walk(o.items);
     app.pub.pruneStories();
+    removeAnchorRuns(app, gone);
   });
   app.tab.ui.select([]);
 }
+
+function collectIds(e: Item, out: string[]): void { out.push(e.id); if (e.kind === 'group') e.children.forEach((c) => collectIds(c, out)); }
 
 /** Removes a frame from its story chain (the text flows into the remaining frames). */
 export function unlinkFrame(app: App, e: Item): void {
@@ -175,12 +179,14 @@ export function applyRun(app: App, label: string, props: Partial<RunProps> | ((c
   if (ed) { ed.applyRun(props); return true; }
   const frames = textTargets(app);
   const tables = selection(app).filter((e) => e.kind === 'table');
-  if (!frames.length && !tables.length) { toast('Select a text frame, or click inside text, to format it.'); return false; }
+  const paths = pathTextTargets(app);
+  if (!frames.length && !tables.length && !paths.length) { toast('Select a text frame, or click inside text, to format it.'); return false; }
   const pub = app.pub;
   pub.transact(label, () => {
     const paras: Paragraph[] = [];
     for (const f of new Set(frames.map((f) => f.story))) { const s = pub.story(f); if (s) paras.push(...s.paras); }
     for (const t of tables) if (t.kind === 'table') for (const r of t.rows) for (const c of r.cells) paras.push(...c.text);
+    for (const pt of paths) paras.push(...pt.text);
     for (const p of paras) {
       for (const r of p.runs) if (!r.br) Object.assign(r, typeof props === 'function' ? props(r) : props);
       p.end = { ...(p.end || {}), ...(typeof props === 'function' ? props(p.end || {}) : props) };
@@ -195,12 +201,14 @@ export function applyPara(app: App, label: string, props: Partial<ParaProps> | (
   if (ed) { ed.applyPara(props); return true; }
   const frames = textTargets(app);
   const tables = selection(app).filter((e) => e.kind === 'table');
-  if (!frames.length && !tables.length) { toast('Select a text frame, or click inside text, to format it.'); return false; }
+  const paths = pathTextTargets(app);
+  if (!frames.length && !tables.length && !paths.length) { toast('Select a text frame, or click inside text, to format it.'); return false; }
   const pub = app.pub;
   pub.transact(label, () => {
     const paras: Paragraph[] = [];
     for (const f of new Set(frames.map((f) => f.story))) { const s = pub.story(f); if (s) paras.push(...s.paras); }
     for (const t of tables) if (t.kind === 'table') for (const r of t.rows) for (const c of r.cells) paras.push(...c.text);
+    for (const pt of paths) paras.push(...pt.text);
     for (const p of paras) Object.assign(p, typeof props === 'function' ? props(p) : props);
   });
   return true;
@@ -211,10 +219,9 @@ export function currentRun(app: App): RunProps {
   const ed = activeTextEditor();
   if (ed) return ed.caretRun();
   const f = textTargets(app)[0];
-  if (!f) return {};
-  const s = app.pub.story(f.story);
-  const p = s?.paras[0];
-  const r = p?.runs.find((x) => !x.br) || p?.end;
+  const p = f ? app.pub.story(f.story)?.paras[0] : pathTextTargets(app)[0]?.text[0];
+  if (!p) return {};
+  const r = p.runs.find((x) => !x.br && !x.anchor && !x.footnote) || p.end;
   return r ? { ...r } : {};
 }
 
@@ -222,9 +229,22 @@ export function currentPara(app: App): Partial<Paragraph> {
   const ed = activeTextEditor();
   if (ed) return ed.caretPara();
   const f = textTargets(app)[0];
-  if (!f) return {};
-  const s = app.pub.story(f.story);
-  return s?.paras[0] || {};
+  if (f) return app.pub.story(f.story)?.paras[0] || {};
+  return pathTextTargets(app)[0]?.text[0] || {};
+}
+
+/** Text-on-a-path items among the selection (inside groups too); their text is one paragraph target. */
+export function pathTextTargets(app: App): PathTextItem[] {
+  const out: PathTextItem[] = [];
+  const walk = (els: Item[]) => { for (const e of els) { if (e.kind === 'pathText') out.push(e); else if (e.kind === 'group') walk(e.children); } };
+  walk(selection(app));
+  return out;
+}
+
+/** Removes the anchor runs of items that are gone (or released), so the text no longer leaves room for them. */
+export function removeAnchorRuns(app: App, ids: string[]): void {
+  if (!ids.length) return;
+  for (const s of app.pub.data.stories) for (const p of s.paras) if (p.runs.some((r) => r.anchor && ids.includes(r.anchor))) p.runs = p.runs.filter((r) => !(r.anchor && ids.includes(r.anchor)));
 }
 
 // ------------------------------------------------------------------------------------------
@@ -267,7 +287,7 @@ export function unlinkAfter(app: App, f: TextFrame): void {
     let split: { para: number; off: number } | null = null;
     if (lay) {
       const lastBoxOfF = Math.max(...lay.boxes.map((b, k) => (b.frame === f.id ? k : -1)));
-      const after = lay.r.lines.filter((l) => l.box > lastBoxOfF);
+      const after = lay.r.lines.filter((l) => l.box > lastBoxOfF && !l.footnote);
       if (after.length) split = { para: after[0].para, off: after[0].start };
       else if (lay.r.overset) split = lay.r.overset;
     }
@@ -330,6 +350,7 @@ export function splitRuns(runs: Run[], from: number, to: number, fn: (r: Run) =>
 }
 
 export function sameRun(a: Run, b: Run): boolean {
+  if (a.anchor || b.anchor || a.footnote || b.footnote) return false;
   const { text: _a, ...ra } = a as any; const { text: _b, ...rb } = b as any;
   return JSON.stringify(ra) === JSON.stringify(rb);
 }

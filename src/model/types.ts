@@ -72,6 +72,13 @@ export interface Run extends RunProps {
   varName?: string;
   /** A line break inside the paragraph. */
   br?: boolean;
+  /**
+   * Id of an item anchored at this run (the run's text is the object replacement character U+FFFC);
+   * the layout engine positions the item next to the text.
+   */
+  anchor?: string;
+  /** Id of a footnote (in the story's `footnotes`); the text holds the last displayed reference label. */
+  footnote?: string;
 }
 
 export type BulletKind = 'none' | 'char' | 'num';
@@ -139,12 +146,31 @@ export interface ObjectStyle {
   gutter?: number;
 }
 
+export interface Footnote { id: string; paras: Paragraph[] }
+
 export interface Story {
   id: string;
   paras: Paragraph[];
   /** Name shown in the Stories/Text Threads panes. */
   name?: string;
+  /** Footnotes referenced by runs with `footnote` (set at the bottom of the column holding the reference). */
+  footnotes?: Footnote[];
 }
+
+export interface FootnoteOptions {
+  /** Numbering scheme; 'symbols' cycles * † ‡ § ‖ ¶ (then doubled). */
+  scheme: NumScheme | 'symbols';
+  /** Numbering restarts per story or per page. */
+  restart: 'story' | 'page';
+  /** Separator rule: stroke width, length as a fraction of the column width, and space above it. */
+  separator: { width: number; length: number; space: number };
+  /** Paragraph style of footnote text. */
+  style: string;
+  /** Footnotes sit at the bottom of their column, or of the frame's first column. */
+  placement: 'column' | 'frame';
+}
+
+export const DEFAULT_FOOTNOTE_OPTIONS: FootnoteOptions = { scheme: 'arabicPlain', restart: 'story', separator: { width: 0.5, length: 0.33, space: 6 }, style: 'Footnote', placement: 'column' };
 
 // ------------------------------------------------------------------------------------------
 // Items (frames)
@@ -181,6 +207,23 @@ export interface ItemBase {
   /** Master page item that this page item overrides (id on the master). */
   masterOf?: string;
   tags?: Record<string, string>;
+  /**
+   * The item travels with the text of a story (an inline object, an object above its line, or one at
+   * an offset from its anchor); x and y are then written by the layout, w and h stay authored.
+   */
+  anchored?: AnchorOptions;
+}
+
+export interface AnchorOptions {
+  story: string;
+  mode: 'inline' | 'above' | 'custom';
+  /** Offset from the anchor point (custom), or from the paragraph's left (above). */
+  dx?: number;
+  dy?: number;
+  /** Horizontal alignment of an object above its line. */
+  align?: 'l' | 'ctr' | 'r';
+  /** Vertical alignment of an inline object on its line. */
+  valign?: 'baseline' | 'ctr' | 'top';
 }
 
 export interface TextFrame extends ItemBase {
@@ -253,7 +296,28 @@ export interface GroupItem extends ItemBase {
   children: Item[];
 }
 
-export type Item = TextFrame | PictureFrame | ShapeItem | LineItem | TableItem | GroupItem;
+/** Text set along a path (the path is drawn in a local box and scaled to the item's box). */
+export interface PathTextItem extends ItemBase {
+  kind: 'pathText';
+  path: { d: string; w: number; h: number };
+  /** One paragraph normally; several are joined with spaces. */
+  text: Paragraph[];
+  align: 'start' | 'center' | 'end' | 'justify';
+  /** Start offset along the path, points. */
+  offset: number;
+  /** Perpendicular shift from the path, points (negative = the other side). */
+  baseline: number;
+  /** Set the text on the other side, running the other way. */
+  flip?: boolean;
+  /** Extra tracking between characters, points. */
+  spacing?: number;
+  /** Draw the path with the item's outline. */
+  showPath?: boolean;
+  /** Preset name the path was made from (line, arcUp, arcDown, circle, wave, zigzag, shape). */
+  preset?: string;
+}
+
+export type Item = TextFrame | PictureFrame | ShapeItem | LineItem | TableItem | GroupItem | PathTextItem;
 
 // ------------------------------------------------------------------------------------------
 // Pages
@@ -334,6 +398,8 @@ export interface Publication {
   finalMarked?: boolean;
   /** Document-level Quick Access Bar additions. */
   qat?: string[];
+  /** Footnote numbering and placement. */
+  footnoteOptions?: FootnoteOptions;
 }
 
 export interface MediaItem { mime: string; b64: string; name?: string; w?: number; h?: number; dpi?: number }

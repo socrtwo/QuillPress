@@ -73,6 +73,12 @@
 .qp-textedit { position: absolute; pointer-events: auto; outline: none; cursor: text; white-space: pre-wrap; overflow-wrap: break-word; transform-origin: 50% 50%; caret-color: var(--accent); z-index: 4; line-height: 1.2; background: rgba(255,255,255,.001); }
 .qp-textedit .qp-tp { min-height: 1em; }
 .qp-textedit .qp-tp[data-bullet]::before { content: attr(data-bullet); display: inline-block; min-width: var(--qp-hang, 0); text-indent: 0; }
+.qp-textedit .qp-anchor-ph { display: inline-block; vertical-align: baseline; box-sizing: border-box; border: 1px dashed #1e88e5; background: rgba(30,136,229,.08); color: transparent; overflow: hidden; font-size: 1px; line-height: 1; user-select: all; }
+.qp-textedit .qp-fnref { vertical-align: super; font-size: 0.67em; color: var(--accent); background: rgba(91,60,158,.12); border-radius: 2px; padding: 0 1px; cursor: pointer; user-select: all; }
+.qp-sel.qp-sel-anchored { outline-color: #1e88e5; }
+.qp-fn-row { display: flex; gap: 6px; align-items: flex-start; margin: 4px 0; }
+.qp-fn-row .qp-fn-text { flex: 1; min-width: 0; resize: vertical; font: inherit; font-size: 12px; }
+.qp-fn-row sup { font-size: 10px; }
 
 /* Widgets ------------------------------------------------------------------------------------ */
 .qp-swatch { display: inline-block; width: 18px; height: 18px; border-radius: 4px; border: 1px solid rgba(0,0,0,.25); flex: none; }

@@ -14,7 +14,7 @@ export type MethodId = 'identify' | 'open' | 'zip' | 'json' | 'sla' | 'media' | 
 
 export interface MethodResult { id: MethodId; name: string; desc: string; status: MethodStatus; detail?: string; pages?: number; words?: number; pictures?: number }
 
-export type PublicationKind = 'qpp' | 'qppe' | 'json' | 'sla' | 'zip' | 'text' | 'other' | 'unknown';
+export type PublicationKind = 'qpp' | 'qppe' | 'json' | 'sla' | 'zip' | 'text' | 'layout' | 'other' | 'unknown';
 
 export interface RepairedPackage { kind: 'qpp' | 'sla'; blob: Blob; name: string; repairedParts: string[]; salvagedParts: string[]; lostParts: string[] }
 
@@ -157,7 +157,7 @@ export async function recoverPublication(data: Uint8Array | ArrayBuffer, name: s
   let ident: FileIdReport;
   try { ident = analyze(bytes, name); } catch (e: any) { ident = { fileName: name, primary: { ext: 'bin', description: 'Unreadable', confidence: 'low' }, segments: [], matching: [], foreign: [], multiple: false, mismatch: true, proceedBytes: bytes } as any; }
   const ext = ident.primary?.ext || 'bin';
-  const kind: PublicationKind = ext === 'qpp' ? 'qpp' : ext === 'sla' ? 'sla' : ext === 'json' ? 'json' : ext === 'zip' ? 'zip' : ['txt', 'rtf', 'html', 'docx', 'xml'].includes(ext) ? 'text' : ext === 'bin' ? 'unknown' : 'other';
+  const kind: PublicationKind = ext === 'qpp' ? 'qpp' : ext === 'sla' ? 'sla' : ext === 'json' ? 'json' : ext === 'zip' ? 'zip' : ['txt', 'rtf', 'html', 'docx', 'xml'].includes(ext) ? 'text' : ['idml', 'indd', 'pub', 'qxp', 'pmd', 'mif', 'xtg'].includes(ext) ? 'layout' : ext === 'bin' ? 'unknown' : 'other';
   const head = String.fromCharCode(...bytes.subarray(0, 5));
   if (head === 'QFDE1') {
     add('identify', 'success', 'Encrypted QuillPress publication (.qppe). Encrypted data cannot be repaired without the password; try opening it with the password first.');

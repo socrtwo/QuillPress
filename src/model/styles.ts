@@ -27,6 +27,7 @@ export function defaultStyles(): Publication['styles'] {
     { name: 'Table Header', basedOn: 'Table Text', run: { font: DEFAULT_HEAD_FONT, size: 9, b: true, color: 'White' }, next: 'Table Text' },
     { name: 'Folio', align: 'ctr', run: { font: DEFAULT_HEAD_FONT, size: 8, color: 'Dark Gray' }, next: 'Folio' },
     { name: 'Contact', align: 'l', lineSpacing: 120, run: { font: DEFAULT_HEAD_FONT, size: 8, color: 'Black' }, next: 'Contact' },
+    { name: 'Footnote', align: 'l', spaceAfter: 2, lineSpacing: 115, hyphenate: true, run: { font: DEFAULT_BODY_FONT, size: 8, color: 'Black' }, next: 'Footnote' },
   ];
   const char: CharStyle[] = [
     { name: 'Emphasis', i: true },
@@ -35,6 +36,7 @@ export function defaultStyles(): Publication['styles'] {
     { name: 'Small Caps', caps: 'small' },
     { name: 'Link', color: 'Primary', u: true },
     { name: 'Run-in Head', b: true, caps: 'small', spc: 0.3 },
+    { name: 'Footnote Reference', baseline: 33 },
   ];
   const object: ObjectStyle[] = [
     { name: 'Basic Text Frame', fill: { type: 'none' }, line: {}, insets: [4, 4, 4, 4] },
@@ -181,6 +183,13 @@ export function applyFontScheme(pub: Publication, scheme: { name: string; head: 
     s.run.font = /heading|headline|deck|byline|subhead|caption|table|folio|contact/i.test(s.name) ? scheme.head : scheme.body;
   }
   pub.scheme = { ...(pub.scheme || {}), fonts: scheme.name };
+}
+
+/** Adds the footnote styles to a publication that lacks them (files from before footnotes existed). */
+export function ensureFootnoteStyles(pub: Publication): void {
+  const d = defaultStyles();
+  if (!pub.styles.para.some((s) => s.name === 'Footnote')) pub.styles.para.push(d.para.find((s) => s.name === 'Footnote')!);
+  if (!pub.styles.char.some((s) => s.name === 'Footnote Reference')) pub.styles.char.push(d.char.find((s) => s.name === 'Footnote Reference')!);
 }
 
 /** Fonts used anywhere in the publication. */

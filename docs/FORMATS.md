@@ -12,6 +12,13 @@ This file describes what is implemented now. The longer list of page layout form
 | Encrypted QuillPress publication | .qppe | Yes | Yes | `src/io/qpp.ts`, `src/util/crypto.ts` |
 | QuillPress JSON | .json | Yes | Yes | `src/io/qpp.ts` |
 | Scribus document | .sla | Yes | Yes | `src/io/sla.ts` |
+| InDesign Markup Language | .idml | Yes (layout, stories, styles, colors) | No | `src/io/idml.ts`, `src/io/idmlText.ts` |
+| InDesign document | .indd .indt | Text and pictures only | No | `src/io/legacyLayout.ts` |
+| Microsoft Publisher | .pub | Text and pictures only | No | `src/io/mspub.ts`, `src/io/cfb.ts` |
+| QuarkXPress document | .qxp .qxd .qxt | Text and pictures only | No | `src/io/legacyLayout.ts` |
+| XPress Tags (QuarkXPress text) | .xtg | Yes (styles and formatted text) | No | `src/io/xpressTags.ts` |
+| PageMaker publication | .pmd .p65 .pm6 .pmt | Text and pictures only | No | `src/io/legacyLayout.ts` |
+| FrameMaker MIF | .mif | Yes (pages, frames, flows, formats) | No | `src/io/mif.ts` |
 | Plain text, Markdown | .txt .md | Place into a frame, or open as a one-page publication | Export (File ▸ Export ▸ Text) | `src/io/textImport.ts`, `src/export/html.ts` |
 | Rich Text, Word, HTML | .rtf .docx .html | Place or open | No | `src/io/textImport.ts` |
 | Pictures | .png .jpg .gif .webp .bmp .tif .tiff | Place into a frame, or open as a page | PNG, JPEG, SVG per page | `src/io/images.ts`, `src/io/tiff.ts`, `src/export/images.ts` |
@@ -41,6 +48,32 @@ Scribus 1.4 and 1.5 documents (the open `SCRIBUSUTF8NEW` XML) open and save.
 **Exported:** the same set in reverse. Paragraph styles become `STYLE` elements; swatches become `COLOR`; pictures are embedded as `ImageData`; frames of a story carry `NEXTITEM`/`BACKITEM`; objects on masters are `MASTEROBJECT`. Effects, baseline grid, comments and variables have no Scribus equivalent and are dropped (Save warns and offers .qpp).
 
 The round trip is tested in `tests/unit/io.test.ts`. The reader is tolerant: unknown elements are ignored, and a truncated file is healed by the recovery engine.
+
+## InDesign (.idml, .indd)
+
+**IDML** is Adobe's documented interchange package: a ZIP of XML files. `src/io/idml.ts` reads the package and `src/io/idmlText.ts` its resources and stories.
+
+**Imported:** page size, facing pages, bleed and the display unit (`Resources/Preferences.xml`); layers; master spreads (one QuillPress master per master-spread page, named *A-Master (Left)* / *(Right)* for facing pages) with their margins, columns and items; spreads with pages, each page's margins and columns, and the master applied by side; sections (page numbering) and custom text variables; `Resources/Graphic.xml` colors (CMYK, RGB and Lab), tints and gradients as swatches and fills; `Resources/Styles.xml` paragraph styles (size, font, bold/italic, alignment, indents, spacing, leading, hyphenation, drop caps, keep options, bullets and numbering, tabs, rules, based-on and next style), character styles and object styles; text frames with columns, gutter, insets, vertical alignment, auto-size, ignore-wrap and their story **chains** (`PreviousTextFrame`/`NextTextFrame`); rectangles, ovals, polygons (as custom paths), lines and groups with fills, strokes, dashes, opacity, rotation (from `ItemTransform`), lock, visibility, names and text wrap; picture frames with the picture when it is embedded in the package, otherwise the linked file's name (IDML does not carry linked pictures: the frame is kept and the warning lists the names for Tools ▸ Relink Picture); stories with paragraph and character style ranges and local overrides, forced line breaks, tabs, text variables, hyperlinks' text, tables (as tab-separated rows) and footnotes (into the publication's footnotes when the model has them, otherwise as a *Notes* list at the end of the story). Objects anchored in text are placed as free objects near the story's first frame.
+
+**Not imported:** buttons, forms, sounds and movies (counted in the warning), XML structure, conditional text, object effects beyond opacity, and InDesign's own typesetting (optical kerning, justification settings), so lines break where QuillPress breaks them.
+
+**.indd** (the binary document) has no public specification. QuillPress identifies it by its header and recovers its text (UTF-16 runs) and embedded pictures into frames you can lay out again. Ask InDesign for an IDML export for the real layout.
+
+## Microsoft Publisher (.pub)
+
+A Publisher file is an OLE2 compound file ([MS-CFB], read by `src/io/cfb.ts`). Its `Quill` stream holds the publication's text as UTF-16; its `Contents` and `Escher` streams hold the layout and the pictures as Office Art BLIP records ([MS-ODRAW]). Publisher's own layout structures are not publicly documented (the Microsoft Open Specifications cover the container and the drawing records, not Publisher), so `src/io/mspub.ts` recovers the **text** (paragraph by paragraph, from the Quill stream) and the **pictures** (JPEG, PNG, TIFF and DIB blips, plus any picture found by signature) and places them in flowing frames and on picture pages, with a warning that says so. Frames, styles, master pages and the page size are not read; the page is Letter.
+
+## QuarkXPress (.qxp, .qxd, .qxt) and XPress Tags (.xtg)
+
+QuarkXPress documents (identified by the `MMXPR`/`IIXPR` header) have no public specification; QuillPress recovers their text (Mac Roman for Mac files, Windows Latin for Windows files) and pictures the same way as Publisher files. **XPress Tags**, QuarkXPress's documented tagged-text export, is read properly by `src/io/xpressTags.ts`: the version and encoding header, `@name=` style sheet definitions (alignment, indents, leading, space before and after, size, font), `@name:` paragraph styles, and the character tags for bold, italic, underline, strike, caps, small caps, superscript, subscript, size, font, color and tracking, plus new lines, tabs and special characters. Page geometry is not part of the format; the text flows into frames from the first page.
+
+## PageMaker (.pmd, .p65, .pm6, .pmt)
+
+Identified by the endianness mark and the product name in the header; text (Windows Latin or Mac Roman, whichever reads better) and pictures are recovered as for the other binary formats.
+
+## FrameMaker MIF (.mif)
+
+Maker Interchange Format is FrameMaker's documented text format. `src/io/mif.ts` reads the page size, body pages with their text rectangles (frames with columns), the paragraph catalog (alignment, indents, space before and after, leading, font family, size, weight, angle, hyphenation, next tag, bullets) and the text flows: paragraphs with their tags and local formats, inline font changes, tabs, hard returns and special characters, chained through the rectangles they run through. Tables, anchored frames, graphics, variables (kept as `[Name]`) and master pages are not read yet.
 
 ## Text and pictures
 

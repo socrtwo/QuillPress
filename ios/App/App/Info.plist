@@ -73,6 +73,24 @@
 		</dict>
 		<dict>
 			<key>CFBundleTypeName</key>
+			<string>Page Layout Files from Other Programs</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.adobe.indesign-idml-package</string>
+				<string>com.adobe.indesign-document</string>
+				<string>com.microsoft.publisher.pub</string>
+				<string>com.quark.quarkxpress.document</string>
+				<string>com.adobe.pagemaker-publication</string>
+				<string>com.adobe.framemaker-mif</string>
+				<string>com.quark.xpress-tags</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
 			<string>Text, Markdown, Rich Text and Word Documents</string>
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>
@@ -110,6 +128,162 @@
 	<!-- Types iOS may not declare itself; imported so the document types above resolve. -->
 	<key>UTImportedTypeDeclarations</key>
 	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.adobe.indesign-idml-package</string>
+			<key>UTTypeDescription</key>
+			<string>InDesign Markup Language Package</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.zip-archive</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>idml</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>application/vnd.adobe.indesign-idml-package</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.adobe.indesign-document</string>
+			<key>UTTypeDescription</key>
+			<string>InDesign Document</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>indd</string>
+					<string>indt</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>application/x-indesign</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.microsoft.publisher.pub</string>
+			<key>UTTypeDescription</key>
+			<string>Microsoft Publisher Publication</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>pub</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>application/x-mspublisher</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.quark.quarkxpress.document</string>
+			<key>UTTypeDescription</key>
+			<string>QuarkXPress Document</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>qxp</string>
+					<string>qxd</string>
+					<string>qxt</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>application/vnd.quark.quarkxpress</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.adobe.pagemaker-publication</string>
+			<key>UTTypeDescription</key>
+			<string>PageMaker Publication</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>pmd</string>
+					<string>p65</string>
+					<string>pm6</string>
+					<string>pmt</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>application/x-pagemaker</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.adobe.framemaker-mif</string>
+			<key>UTTypeDescription</key>
+			<string>FrameMaker Interchange Format</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.plain-text</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>mif</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>application/x-mif</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.quark.xpress-tags</string>
+			<key>UTTypeDescription</key>
+			<string>XPress Tags Text</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.plain-text</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>xtg</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>text/x-xpress-tags</string>
+				</array>
+			</dict>
+		</dict>
 		<dict>
 			<key>UTTypeIdentifier</key>
 			<string>net.scribus.sla</string>

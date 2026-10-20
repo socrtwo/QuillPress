@@ -62,6 +62,9 @@ export function renderBackstage(app: App, root: HTMLElement, page: string): void
         card('Open and Repair…', 'Rebuild a damaged .qpp or .sla and show what was recovered', 'healing', () => app.exec('file.openRepair')),
         card('Recover Data from Any File…', 'Pull readable text and pictures out of any file, however damaged', 'text_snippet', () => app.exec('file.recoverAny')),
         card('Place text…', 'Flow a text, Markdown, RTF or Word file into a new text frame', 'notes', () => app.exec('insert.textFile')),
+        card('Import InDesign (IDML)…', 'Spreads, master pages, frames, stories, styles and colors from an .idml package', 'auto_stories', () => app.exec('file.import.idml')),
+        card('Import Publisher, QuarkXPress or PageMaker…', 'Recover the text and pictures of a .pub, .qxp, .pmd or .indd file into frames', 'drive_file_move', () => app.exec('file.import.layoutFile')),
+        card('Import XPress Tags or MIF…', 'QuarkXPress tagged text (.xtg) or FrameMaker interchange (.mif)', 'code', () => app.exec('file.import.xpressTags')),
         card('Recover unsaved publications', 'Drafts saved automatically before a crash or close', 'restore_page', () => app.exec('file.recoverUnsaved')),
         h('h2', null, 'Recent'));
       recentList(app, body, true);

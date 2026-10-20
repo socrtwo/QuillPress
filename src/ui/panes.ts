@@ -31,11 +31,11 @@ export const typingIn = (el: HTMLElement) => { const a = document.activeElement 
 
 export const sigOf = (el: HTMLElement, sig: string) => { if (el.dataset.sig === sig) return false; el.dataset.sig = sig; return true; };
 
-export const KIND_ICON: Record<string, string> = { text: 'text_fields', picture: 'image', shape: 'shapes', line: 'horizontal_rule', table: 'table', group: 'join' };
+export const KIND_ICON: Record<string, string> = { text: 'text_fields', picture: 'image', shape: 'shapes', line: 'horizontal_rule', table: 'table', group: 'join', pathText: 'gesture' };
 
 export function itemLabel(e: Item): string {
   if (e.name) return e.name;
-  return { text: 'Text frame', picture: 'Picture', shape: 'Shape', line: 'Line', table: 'Table', group: 'Group' }[e.kind] || e.kind;
+  return ({ text: 'Text frame', picture: 'Picture', shape: 'Shape', line: 'Line', table: 'Table', group: 'Group', pathText: 'Text on a path' } as Record<string, string>)[e.kind] || e.kind;
 }
 
 // ------------------------------------------------------------------------------------------

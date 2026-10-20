@@ -26,7 +26,7 @@ export const DEFAULT_TABS: RibbonTab[] = [
   {
     id: 'insert', label: 'Insert', groups: [
       { id: 'pages', label: 'Pages', items: ['page.insert', 'page.insertBefore', 'page.insertMany', 'insert.pageNumber', 'insert.pageCount', 'insert.sectionMarker'] },
-      { id: 'text', label: 'Text', items: ['insert.textFrame', 'insert.placeholderText', 'insert.textFile', 'insert.caption', 'insert.pullQuote', 'insert.sidebar', 'insert.toc'] },
+      { id: 'text', label: 'Text', items: ['insert.textFrame', 'insert.placeholderText', 'insert.textFile', 'insert.caption', 'insert.pullQuote', 'insert.sidebar', 'insert.toc', 'insert.textOnPath', 'insert.inlinePicture', 'insert.inlineFrame'] },
       { id: 'pictures', label: 'Pictures', items: ['insert.picture', 'insert.pictureFrame', 'insert.pictureFromUrl', 'insert.screenshot'] },
       { id: 'illustrations', label: 'Illustrations', items: ['insert.shape', 'insert.line', 'insert.rectangle', 'insert.ellipse', 'insert.polygon', 'insert.star', 'insert.arrow'] },
       { id: 'tables', label: 'Tables', items: ['insert.table', 'insert.drawTable', 'insert.tableFromText'] },
@@ -51,6 +51,7 @@ export const DEFAULT_TABS: RibbonTab[] = [
       { id: 'frameOptions', label: 'Frame Options', items: ['text.columns', 'text.insets', 'text.verticalAlign', 'text.autosize', 'text.ignoreWrap', 'text.frameOptions'] },
       { id: 'typography', label: 'Typography', items: ['fmt.tracking', 'fmt.kerning', 'fmt.ligatures', 'fmt.smallCaps', 'fmt.allCaps', 'fmt.baselineShift', 'fmt.hyphenation', 'fmt.baselineGridAlign', 'fmt.tabs'] },
       { id: 'flow', label: 'Paragraph Flow', items: ['fmt.keepWithNext', 'fmt.keepLines', 'fmt.ruleAbove', 'fmt.ruleBelow', 'fmt.paragraphDialog'] },
+      { id: 'notes', label: 'Notes', items: ['text.insertFootnote', 'text.editFootnote', 'text.deleteFootnote', 'text.prevFootnote', 'text.nextFootnote', 'text.goToReference', 'text.footnotesToEndnotes', 'text.endnotesToFootnotes', 'text.footnotesPane'], launcher: 'text.footnoteOptions' },
       { id: 'tools', label: 'Tools', items: ['text.fitCopy', 'text.oversetReport', 'text.storyEditor', 'text.wordCount', 'text.changeCase', 'text.insertLorem', 'tools.convertQuotes'] },
     ],
   },
@@ -61,6 +62,7 @@ export const DEFAULT_TABS: RibbonTab[] = [
       { id: 'group', label: 'Group', items: ['arrange.group', 'arrange.ungroup', 'arrange.lock', 'arrange.unlockAll', 'arrange.hide', 'arrange.showAll'] },
       { id: 'rotate', label: 'Rotate', items: ['arrange.rotate', 'arrange.rotateLeft', 'arrange.rotateRight', 'arrange.flipH', 'arrange.flipV'] },
       { id: 'wrap', label: 'Text Wrap', items: ['arrange.wrap', 'arrange.wrapNone', 'arrange.wrapSquare', 'arrange.wrapTight', 'arrange.wrapTopBottom', 'arrange.wrapOffset'] },
+      { id: 'anchor', label: 'Anchor', items: ['arrange.anchorInline', 'arrange.anchorAbove', 'arrange.anchorCustom', 'arrange.releaseAnchor'], launcher: 'arrange.anchorOptions' },
       { id: 'size', label: 'Size and Position', items: ['arrange.sizeDialog', 'arrange.stepRepeat', 'arrange.layersPane', 'arrange.moveToLayer', 'arrange.makeSameSize'] },
     ],
   },
@@ -129,8 +131,9 @@ export const DEFAULT_TABS: RibbonTab[] = [
     id: 'textFrame', label: 'Text Frame', contextual: (app) => only(app, ['text']) && !app.tab?.masterTarget, accent: '#5B3C9E', groups: [
       { id: 'frame', label: 'Frame', items: ['text.columns', 'text.insets', 'text.verticalAlign', 'text.autosize', 'text.frameOptions', 'shape.change'] },
       { id: 'flow', label: 'Flow', items: ['text.link', 'text.unlink', 'text.nextFrame', 'text.prevFrame', 'text.fitCopy'] },
+      { id: 'notes', label: 'Notes', items: ['text.insertFootnote', 'text.footnotesPane'] },
       { id: 'style', label: 'Frame Style', items: ['shape.objectStyle', 'shape.fill', 'shape.outline', 'shape.effects', 'shape.transparency'] },
-      { id: 'wrap', label: 'Text Wrap', items: ['arrange.wrap'] },
+      { id: 'wrap', label: 'Text Wrap', items: ['arrange.wrap', 'arrange.anchorInline'] },
       { id: 'arrange', label: 'Arrange', items: ['arrange.bringForward', 'arrange.sendBackward', 'arrange.align', 'arrange.group', 'arrange.rotate'] },
       { id: 'size', label: 'Size', items: ['shape.height', 'shape.width', 'arrange.sizeDialog'] },
     ],
@@ -142,7 +145,7 @@ export const DEFAULT_TABS: RibbonTab[] = [
       { id: 'picture', label: 'Picture', items: ['picture.place', 'picture.change', 'picture.saveAs', 'picture.info', 'picture.compress'] },
       { id: 'style', label: 'Frame Style', items: ['shape.change', 'shape.outline', 'shape.effects', 'shape.transparency'] },
       { id: 'accessibility', label: 'Accessibility', items: ['review.altText', 'review.decorative'] },
-      { id: 'wrap', label: 'Text Wrap', items: ['arrange.wrap', 'arrange.wrapOffset'] },
+      { id: 'wrap', label: 'Text Wrap', items: ['arrange.wrap', 'arrange.wrapOffset', 'arrange.anchorInline'] },
       { id: 'arrange', label: 'Arrange', items: ['arrange.bringForward', 'arrange.sendBackward', 'arrange.align', 'arrange.rotate'] },
       { id: 'size', label: 'Size', items: ['shape.height', 'shape.width', 'arrange.sizeDialog'] },
     ],
@@ -151,7 +154,7 @@ export const DEFAULT_TABS: RibbonTab[] = [
     id: 'shapeFormat', label: 'Shape', contextual: (app) => only(app, ['shape', 'group']), accent: '#C2502A', groups: [
       { id: 'insert', label: 'Insert Shapes', items: ['insert.shape', 'shape.change', 'shape.editPoints'] },
       { id: 'styles', label: 'Shape Styles', items: ['shape.objectStyle', 'shape.fill', 'shape.outline', 'shape.effects', 'shape.transparency'] },
-      { id: 'text', label: 'Text', items: ['shape.convertToText', 'review.altText', 'review.decorative'] },
+      { id: 'text', label: 'Text', items: ['shape.convertToText', 'path.fromShape', 'review.altText', 'review.decorative'] },
       { id: 'wrap', label: 'Text Wrap', items: ['arrange.wrap', 'arrange.wrapOffset'] },
       { id: 'arrange', label: 'Arrange', items: ['arrange.bringForward', 'arrange.sendBackward', 'arrange.align', 'arrange.group', 'arrange.rotate'] },
       { id: 'size', label: 'Size', items: ['shape.height', 'shape.width', 'arrange.sizeDialog'] },
@@ -161,6 +164,15 @@ export const DEFAULT_TABS: RibbonTab[] = [
     id: 'lineFormat', label: 'Line', contextual: (app) => only(app, ['line']), accent: '#C2502A', groups: [
       { id: 'line', label: 'Line', items: ['shape.outline', 'shape.lineWidth', 'shape.lineDash', 'shape.lineEnds', 'shape.objectStyle'] },
       { id: 'arrange', label: 'Arrange', items: ['arrange.bringForward', 'arrange.sendBackward', 'arrange.align', 'arrange.rotate'] },
+    ],
+  },
+  {
+    id: 'textPath', label: 'Text Path', contextual: (app) => only(app, ['pathText']), accent: '#C2502A', groups: [
+      { id: 'text', label: 'Path Text', items: ['path.editText', 'path.align', 'path.offset', 'path.baseline', 'path.spacing', 'path.flip'] },
+      { id: 'path', label: 'Path', items: ['path.showPath', 'shape.outline', 'path.release'] },
+      { id: 'font', label: 'Font', items: ['fmt.font', 'fmt.fontSize', 'fmt.bold', 'fmt.italic', 'fmt.fontColor'] },
+      { id: 'arrange', label: 'Arrange', items: ['arrange.bringForward', 'arrange.sendBackward', 'arrange.align', 'arrange.rotate', 'arrange.wrap'] },
+      { id: 'size', label: 'Size', items: ['shape.height', 'shape.width', 'arrange.sizeDialog'] },
     ],
   },
   {

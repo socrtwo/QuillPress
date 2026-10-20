@@ -40,7 +40,7 @@ const RECOMMEND_ORDER: Record<string, string[]> = {
 };
 
 /** File kinds QuillPress itself opens or places. */
-export const HANDLED_HERE = ['qpp', 'sla', 'json', 'xml', 'txt', 'docx', 'rtf', 'html', 'png', 'jpg', 'gif', 'bmp', 'tif', 'webp', 'zip', 'svg'];
+export const HANDLED_HERE = ['qpp', 'sla', 'json', 'xml', 'txt', 'docx', 'rtf', 'html', 'png', 'jpg', 'gif', 'bmp', 'tif', 'webp', 'zip', 'svg', 'idml', 'indd', 'pub', 'qxp', 'pmd', 'mif', 'xtg'];
 
 export const DESCRIPTIONS: Record<string, string> = {
   docx: 'Microsoft Word document (DOCX, Office Open XML)', xlsx: 'Microsoft Excel workbook (XLSX)', pptx: 'Microsoft PowerPoint presentation (PPTX)',
@@ -53,6 +53,7 @@ export const DESCRIPTIONS: Record<string, string> = {
   html: 'HTML document', sqlite: 'SQLite database', pst: 'Outlook data file (PST/OST)', wav: 'WAV audio', avi: 'AVI video', webp: 'WebP image',
   ogg: 'OGG media', flac: 'FLAC audio', mp3: 'MP3 audio', mp4: 'MP4 / QuickTime media', exe: 'Windows executable (EXE/DLL)',
   txt: 'Plain text', csv: 'Comma-separated values (CSV)', bin: 'Unrecognized binary data', qpp: 'QuillPress publication (QPP)', sla: 'Scribus document (SLA)', json: 'JSON data', svg: 'SVG drawing',
+  idml: 'InDesign Markup Language package (IDML)', indd: 'InDesign document (INDD)', pub: 'Microsoft Publisher publication (PUB)', qxp: 'QuarkXPress document (QXP)', pmd: 'PageMaker publication (PMD)', mif: 'FrameMaker Interchange Format (MIF)', xtg: 'XPress Tags text (XTG)',
 };
 
 export const MIME: Record<string, string> = {
@@ -60,6 +61,7 @@ export const MIME: Record<string, string> = {
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', doc: 'application/msword', xls: 'application/vnd.ms-excel', qpp: 'application/x-quillpress', sla: 'application/x-scribus', json: 'application/json', svg: 'image/svg+xml',
   ppt: 'application/vnd.ms-powerpoint', pdf: 'application/pdf', png: 'image/png', gif: 'image/gif', jpg: 'image/jpeg', zip: 'application/zip',
   xml: 'application/xml', txt: 'text/plain', html: 'text/html', odt: 'application/vnd.oasis.opendocument.text', rtf: 'application/rtf',
+  idml: 'application/vnd.adobe.indesign-idml-package', indd: 'application/x-indesign', pub: 'application/x-mspublisher', qxp: 'application/vnd.quark.quarkxpress', pmd: 'application/x-pagemaker', mif: 'application/x-mif', xtg: 'text/x-xpress-tags',
 };
 
 const programByKey = (key: string) => PROGRAMS.find((p) => p.key === key) || null;
@@ -92,11 +94,13 @@ const SIG = {
   SEVENZ: [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c], RAR: [0x52, 0x61, 0x72, 0x21, 0x1a, 0x07], GZIP: [0x1f, 0x8b, 0x08], XMLDECL: [0x3c, 0x3f, 0x78, 0x6d, 0x6c],
   TIFF_LE: [0x49, 0x49, 0x2a, 0x00], TIFF_BE: [0x4d, 0x4d, 0x00, 0x2a], SQLITE: [0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66], RIFF: [0x52, 0x49, 0x46, 0x46],
   OGG: [0x4f, 0x67, 0x67, 0x53], FLAC: [0x66, 0x4c, 0x61, 0x43], ID3: [0x49, 0x44, 0x33], PST: [0x21, 0x42, 0x44, 0x4e],
+  INDD: [0x06, 0x06, 0xed, 0xf5, 0xd8, 0x1d, 0x46, 0xe5, 0xbd, 0x31, 0xef, 0xe7, 0xfe, 0x74, 0xb7, 0x1d],
 };
 
 function refineZip(b: Uint8Array, start: number, end: number): string {
   const has = (s: string) => indexOfBytes(b, ascii(s), start, end) !== -1;
   if (has('mimetypeapplication/x-quillpress') || has('publication.json')) return 'qpp';
+  if (has('mimetypeapplication/vnd.adobe.indesign-idml-package') || has('designmap.xml')) return 'idml';
   if (has('mimetypeapplication/vnd.oasis.opendocument.text')) return 'odt';
   if (has('mimetypeapplication/vnd.oasis.opendocument.spreadsheet')) return 'ods';
   if (has('mimetypeapplication/vnd.oasis.opendocument.presentation')) return 'odp';
@@ -144,6 +148,7 @@ function walkZipEntries(b: Uint8Array, start: number): { end: number; clean: boo
 function refineOle(b: Uint8Array, start: number, end: number): string {
   const has16 = (s: string) => indexOfBytes(b, utf16le(s), start, end) !== -1;
   if (has16('WordDocument')) return 'doc';
+  if (has16('Quill') && (has16('Contents') || has16('Escher'))) return 'pub';
   if (has16('Workbook') || has16('Book')) return 'xls';
   if (has16('PowerPoint Document')) return 'ppt';
   if (has16('VisioDocument')) return 'vsd';
@@ -169,6 +174,9 @@ export function identifyAt(b: Uint8Array, start = 0, end = b.length): Identifica
   const res = (ext: string, confidence: Identification['confidence'] = 'high') => ({ ext, description: DESCRIPTIONS[ext] || ext, confidence });
   if (matches(b, start, SIG.ZIP_LOCAL) || matches(b, start, SIG.ZIP_EOCD)) return res(refineZip(b, start, end));
   if (matches(b, start, SIG.OLE2)) return res(refineOle(b, start, end));
+  if (matches(b, start, SIG.INDD)) return res('indd');
+  if (b.length >= start + 8 && /^(MM|II)XPR[0-9]$/.test(String.fromCharCode(b[start + 2], b[start + 3], b[start + 4], b[start + 5], b[start + 6], b[start + 7]))) return res('qxp');
+  if (((b[start] === 0 && b[start + 1] === 0 && b[start + 2] === 0xff && b[start + 3] === 0xff) || (b[start] === 0xff && b[start + 1] === 0xff && b[start + 2] === 0 && b[start + 3] === 0)) && indexOfBytes(b, ascii('PageMaker'), start, Math.min(end, start + 8192)) !== -1) return res('pmd');
   if (matches(b, start, SIG.PDF)) return res('pdf');
   if (matches(b, start, SIG.PNG)) return res('png');
   if (matches(b, start, SIG.GIF87) || matches(b, start, SIG.GIF89)) return res('gif');
@@ -199,6 +207,8 @@ export function identifyAt(b: Uint8Array, start = 0, end = b.length): Identifica
     if (lower.includes('<!doctype html') || lower.includes('<html')) return res('html');
     if (lower.includes('<scribusutf8new') || lower.includes('<scribus')) return res('sla');
     if (lower.includes('<svg')) return res('svg');
+    if (/^\s*<miffile/.test(lower)) return res('mif');
+    if (/^(\ufeff)?<v\d+(\.\d+)?><e\d>/.test(head)) return res('xtg');
     if (lower.includes('<?xml')) return res('xml');
     if (/^\s*</.test(head)) return res('xml', 'medium');
     if (/^\s*\{/.test(head) && lower.includes('"format"')) return res('json', 'medium');
@@ -273,7 +283,7 @@ export function analyze(bytes: Uint8Array, fileName = 'recovered-file'): FileIdR
     else { seg.recommended = recommend(seg.ext); foreign.push(seg); }
   }
   // Prefer a document segment over loose text or XML that happens to precede it.
-  const docKinds = ['qpp', 'sla', 'json', 'docx', 'rtf', 'html'];
+  const docKinds = ['qpp', 'sla', 'json', 'docx', 'rtf', 'html', 'idml', 'indd', 'pub', 'qxp', 'pmd', 'mif', 'xtg'];
   const proceed = matching.find((m) => docKinds.includes(m.ext)) || matching[0] || segments[0];
   if (proceed && matching[0] !== proceed) { matching.splice(matching.indexOf(proceed), 1); matching.unshift(proceed); }
   return {

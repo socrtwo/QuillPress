@@ -168,6 +168,10 @@ export class Pub {
   pruneStories(): void {
     const used = new Set(this.textFrames().map((f) => f.story));
     this.data.stories = this.data.stories.filter((s) => used.has(s.id));
+    // Objects anchored in a story that is gone become free objects where they are.
+    const walk = (els: Item[]) => { for (const e of els) { if (e.anchored && !used.has(e.anchored.story)) delete e.anchored; if (e.kind === 'group') walk(e.children); } };
+    for (const p of this.data.pages) walk(p.items);
+    for (const m of this.data.masters) walk(m.items);
   }
 
   /** The page number text ("3", "iv") for a page index, following sections. */
@@ -322,7 +326,7 @@ export class Pub {
 /** Gives an item (and its children) new ids; returns the copy. */
 export function reId<T extends Item>(e: T): T {
   const c = clone(e);
-  const walk = (x: Item) => { x.id = newId(x.kind === 'text' ? 'tf' : x.kind === 'picture' ? 'pic' : x.kind === 'group' ? 'grp' : 'sh'); delete x.masterOf; if (x.kind === 'group') x.children.forEach(walk); };
+  const walk = (x: Item) => { x.id = newId(x.kind === 'text' ? 'tf' : x.kind === 'picture' ? 'pic' : x.kind === 'group' ? 'grp' : x.kind === 'pathText' ? 'pt' : 'sh'); delete x.masterOf; delete x.anchored; if (x.kind === 'group') x.children.forEach(walk); };
   walk(c);
   return c;
 }

@@ -266,6 +266,9 @@ function marginsOf(pageEl: Element): { margins?: [number, number, number, number
   return { margins: [num(a.Top, 36), num(a.Right, 36), num(a.Bottom, 36), num(a.Left, 36)], columns: Math.max(1, num(a.ColumnCount, 1)), gutter: num(a.ColumnGutter, 12) };
 }
 
+/** The element inside an idPkg:* wrapper file (or the root itself when a file has no wrapper). */
+const inner = (d: Document, name: string): Element | null => kid(d.documentElement, name) || (d.documentElement.localName === name ? d.documentElement : null);
+
 export async function importIdml(data: Uint8Array): Promise<IdmlImport> {
   const warnings: string[] = [];
   const zip = await JSZip.loadAsync(data);
@@ -312,7 +315,7 @@ export async function importIdml(data: Uint8Array): Promise<IdmlImport> {
   for (const ref of kids(doc).filter((k) => k.localName === 'Story')) {
     const src = ref.getAttribute('src');
     const d = src ? await xml(src) : null;
-    const s = d && (d.documentElement.localName === 'Story' ? d.documentElement : kid(d.documentElement, 'Story'));
+    const s = d && inner(d, 'Story');
     if (s) storyEls.set(s.getAttribute('Self') || src || '', s);
   }
   const env: Env = { pub, zip, colors, styles, warnings, layers, stories: new Map(), storyEls, frames: new Map(), links: [], missing: [], pictures: 0, unsupported: new Map(), anchored: [] };
@@ -322,7 +325,7 @@ export async function importIdml(data: Uint8Array): Promise<IdmlImport> {
   for (const ref of kids(doc).filter((k) => k.localName === 'MasterSpread')) {
     const src = ref.getAttribute('src');
     const d = src ? await xml(src) : null;
-    const ms = d && (d.documentElement.localName === 'MasterSpread' ? d.documentElement : kid(d.documentElement, 'MasterSpread'));
+    const ms = d && inner(d, 'MasterSpread');
     if (!ms) continue;
     const prefix = ms.getAttribute('NamePrefix') || 'A', baseName = ms.getAttribute('BaseName') || 'Master';
     const pages = kids(ms).filter((k) => k.localName === 'Page');
@@ -343,7 +346,7 @@ export async function importIdml(data: Uint8Array): Promise<IdmlImport> {
   for (const ref of kids(doc).filter((k) => k.localName === 'Spread')) {
     const src = ref.getAttribute('src');
     const d = src ? await xml(src) : null;
-    const sp = d && (d.documentElement.localName === 'Spread' ? d.documentElement : kid(d.documentElement, 'Spread'));
+    const sp = d && inner(d, 'Spread');
     if (!sp) continue;
     const pageEls = kids(sp).filter((k) => k.localName === 'Page');
     const pages: Page[] = pageEls.map((pg, i) => {

@@ -24,8 +24,8 @@ describe('command modules', () => {
   });
 
   it('exposes every contextual tab and the panes the commands open', () => {
-    expect(DEFAULT_TABS.filter((t) => t.contextual).map((t) => t.id)).toEqual(['masterPage', 'textFrame', 'pictureFormat', 'shapeFormat', 'lineFormat', 'tableDesign', 'tableLayout']);
-    for (const id of ['navigator', 'layers', 'styles', 'swatches', 'threads', 'versions', 'clipboard', 'preflight', 'accessibility', 'links', 'comments']) expect(PANES[id], id).toBeTruthy();
+    expect(DEFAULT_TABS.filter((t) => t.contextual).map((t) => t.id)).toEqual(['masterPage', 'textFrame', 'pictureFormat', 'shapeFormat', 'lineFormat', 'textPath', 'tableDesign', 'tableLayout']);
+    for (const id of ['navigator', 'layers', 'styles', 'swatches', 'threads', 'versions', 'clipboard', 'preflight', 'accessibility', 'links', 'comments', 'footnotes']) expect(PANES[id], id).toBeTruthy();
   });
 
   it('marks document-changing commands and keeps navigation out of macros', () => {

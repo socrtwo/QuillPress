@@ -5,13 +5,16 @@
  */
 import type { Pub } from '../model/pub';
 import type { Item, Page, Master, TextFrame, Paragraph, RunProps, Story } from '../model/types';
+import { DEFAULT_FOOTNOTE_OPTIONS } from '../model/types';
 import { resolvePara, resolveRun } from '../model/styles';
-import { layoutStory, type FlowBox, type LayoutResult, type Rect, type LaidLine } from './text';
+import { layoutStory, type FlowBox, type LayoutResult, type Rect, type LaidLine, type AnchoredInfo } from './text';
 import { fontFamilyCss } from '../fonts';
 
-export interface FrameLayout { frame: TextFrame; lines: LaidLine[]; boxes: FlowBox[]; overset: boolean }
+export interface FrameLayout { frame: TextFrame; lines: LaidLine[]; boxes: FlowBox[]; overset: boolean; separators: { x: number; y: number; w: number }[] }
 
 const cache = new WeakMap<Pub, Map<string, { v: number; r: LayoutResult; boxes: FlowBox[] }>>();
+/** Anchor points (on the line) of anchored items, by item id, from the last layout. */
+const anchorPoints = new WeakMap<Pub, Map<string, { x: number; y: number }>>();
 
 /** The columns of a text frame, in page coordinates (frame rotation is applied by the renderer). */
 export function frameBoxes(frame: TextFrame, owner: { items: Item[] }, pageIndex: number, pub: Pub): FlowBox[] {
@@ -89,9 +92,80 @@ export function layoutOptions(pub: Pub, boxes: FlowBox[], extra: Partial<Paramet
     font: (f: string | undefined) => f || 'Tinos',
     fields: (field: string, box: FlowBox, varName?: string) => fieldText(pub, field, box, varName),
     grid: d.baselineGrid.step > 0 ? { start: d.baselineGrid.start, step: d.baselineGrid.step } : undefined,
+    footnoteOptions: d.footnoteOptions || DEFAULT_FOOTNOTE_OPTIONS,
     ...extra,
   };
 }
+
+/** Layout options for one story: its anchored items and footnotes resolve by id. */
+export function storyOptions(pub: Pub, story: Story, boxes: FlowBox[], extra: Partial<Parameters<typeof layoutStory>[1]> = {}) {
+  const anchored = anchoredItems(pub, story.id);
+  return layoutOptions(pub, boxes, {
+    anchoredItem: (id: string): AnchoredInfo | undefined => { const e = anchored.get(id); return e && e.anchored ? { w: e.w, h: e.h, mode: e.anchored.mode, dx: e.anchored.dx, dy: e.anchored.dy, align: e.anchored.align, valign: e.anchored.valign } : undefined; },
+    footnote: (id: string) => story.footnotes?.find((f) => f.id === id)?.paras,
+    ...extra,
+  });
+}
+
+/** Items anchored to a story, wherever they sit (pages and masters, inside groups too). */
+export function anchoredItems(pub: Pub, storyId: string): Map<string, Item> {
+  const out = new Map<string, Item>();
+  const walk = (items: Item[]) => { for (const e of items) { if (e.anchored?.story === storyId) out.set(e.id, e); if (e.kind === 'group') walk(e.children); } };
+  for (const p of pub.pages) walk(p.items);
+  for (const m of pub.data.masters) walk(m.items);
+  return out;
+}
+
+/**
+ * Writes the positions the layout computed into the anchored items of a story, and moves an item to
+ * the page its line landed on. Returns true when an item with text wrap moved (the wrap exclusions
+ * of the next layout pass change).
+ */
+function applyAnchors(pub: Pub, storyId: string, r: LayoutResult, boxes: FlowBox[]): boolean {
+  const items = anchoredItems(pub, storyId);
+  if (!items.size) return false;
+  let pts = anchorPoints.get(pub);
+  if (!pts) { pts = new Map(); anchorPoints.set(pub, pts); }
+  let wrapMoved = false;
+  const placed = new Set<string>();
+  for (const l of r.lines) {
+    if (!l.anchors) continue;
+    for (const a of l.anchors) {
+      const e = items.get(a.id);
+      if (!e || placed.has(a.id)) continue;
+      placed.add(a.id);
+      pts.set(a.id, { x: a.ax, y: a.ay });
+      const nx = Math.round(a.x * 100) / 100, ny = Math.round(a.y * 100) / 100;
+      const moved = Math.abs(nx - e.x) > 0.01 || Math.abs(ny - e.y) > 0.01;
+      if (moved) {
+        if (e.kind === 'group') { const dx = nx - e.x, dy = ny - e.y; const walk = (els: Item[]) => { for (const c of els) { c.x += dx; c.y += dy; if (c.kind === 'group') walk(c.children); } }; walk(e.children); }
+        e.x = nx; e.y = ny;
+        if (e.wrap && e.wrap.mode !== 'none' && e.wrap.mode !== 'behind') wrapMoved = true;
+      }
+      // The page of the box the line landed on.
+      const box = boxes[l.box];
+      const pageIdx = box?.page ?? -1;
+      if (pageIdx >= 0) {
+        const target = pub.pages[pageIdx];
+        const from = pub.ownerOfItem(e.id);
+        if (target && from && from !== target && from.items.includes(e)) {
+          from.items.splice(from.items.indexOf(e), 1);
+          const fi = target.items.findIndex((x) => x.id === box.frame);
+          target.items.splice(fi >= 0 ? fi + 1 : target.items.length, 0, e);
+        }
+      }
+    }
+  }
+  return wrapMoved;
+}
+
+/** Re-lays every story with anchored objects so their items sit where the text puts them (cached per version). */
+export function syncAnchors(pub: Pub): void {
+  for (const s of pub.data.stories) if (anchoredItems(pub, s.id).size) storyLayout(pub, s.id);
+}
+
+/** Where an anchored item hangs on its line (page coordinates), after the last layout. */
+export function anchorPointOf(pub: Pub, id: string): { x: number; y: number } | undefined { return anchorPoints.get(pub)?.get(id); }
 
 /** The boxes of every frame of a story in chain order (page frames with their page index). */
 export function storyBoxes(pub: Pub, story: Story): FlowBox[] {
@@ -114,10 +188,13 @@ export function storyLayout(pub: Pub, storyId: string): { r: LayoutResult; boxes
   if (!m) { m = new Map(); cache.set(pub, m); }
   const hit = m.get(storyId);
   if (hit && hit.v === pub.version) return hit;
-  const boxes = storyBoxes(pub, story);
   const chain = pub.chainOf(storyId);
   const single = chain.length === 1 && (chain[0].columns || 1) === 1;
-  const r = layoutStory(story.paras, layoutOptions(pub, boxes, { anchor: single ? chain[0].anchor : undefined, unbounded: single && chain[0].autosize === 'height' }));
+  const lay = () => { const boxes = storyBoxes(pub, story); return { boxes, r: layoutStory(story.paras, storyOptions(pub, story, boxes, { anchor: single ? chain[0].anchor : undefined, unbounded: single && chain[0].autosize === 'height' })) }; };
+  let { r, boxes } = lay();
+  // Anchored objects: write their positions; when one with text wrap moved, lay out once more.
+  if (applyAnchors(pub, storyId, r, boxes)) { ({ r, boxes } = lay()); applyAnchors(pub, storyId, r, boxes); }
+  if (r.footnoteLabels) for (const p of story.paras) for (const run of p.runs) if (run.footnote && r.footnoteLabels[run.footnote] && run.text !== r.footnoteLabels[run.footnote]) run.text = r.footnoteLabels[run.footnote];
   const entry = { v: pub.version, r, boxes };
   m.set(storyId, entry);
   return entry;
@@ -126,12 +203,12 @@ export function storyLayout(pub: Pub, storyId: string): { r: LayoutResult; boxes
 /** Lines shown by one frame. */
 export function frameLines(pub: Pub, frame: TextFrame): FrameLayout {
   const l = storyLayout(pub, frame.story);
-  if (!l) return { frame, lines: [], boxes: [], overset: false };
+  if (!l) return { frame, lines: [], boxes: [], overset: false, separators: [] };
   const idx = new Set(l.boxes.map((b, i) => (b.frame === frame.id ? i : -1)).filter((i) => i >= 0));
   const lines = l.r.lines.filter((ln) => idx.has(ln.box));
   const lastBox = Math.max(...l.boxes.map((b, i) => (b.frame === frame.id ? i : -1)));
   const overset = !!l.r.overset && lastBox === l.boxes.length - 1;
-  return { frame, lines, boxes: l.boxes.filter((b) => b.frame === frame.id), overset };
+  return { frame, lines, boxes: l.boxes.filter((b) => b.frame === frame.id), overset, separators: l.r.separators.filter((sp) => idx.has(sp.box)) };
 }
 
 /** Frames whose story does not fit (overset text), with the number of characters that did not fit. */
@@ -156,7 +233,7 @@ export function neededHeight(pub: Pub, frame: TextFrame): number {
   if (!story) return frame.h;
   const ins = frame.insets || [4, 4, 4, 4];
   const box: FlowBox = { frame: frame.id, col: 0, x: frame.x + ins[0], y: frame.y + ins[1], w: Math.max(1, frame.w - ins[0] - ins[2]), h: 1e6 };
-  const r = layoutStory(story.paras, layoutOptions(pub, [box], { unbounded: true }));
+  const r = layoutStory(story.paras, storyOptions(pub, story, [box], { unbounded: true }));
   return Math.max(12, r.used + ins[1] + ins[3]);
 }
 
