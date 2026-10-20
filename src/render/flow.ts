@@ -93,6 +93,7 @@ export function layoutOptions(pub: Pub, boxes: FlowBox[], extra: Partial<Paramet
     fields: (field: string, box: FlowBox, varName?: string) => fieldText(pub, field, box, varName),
     grid: d.baselineGrid.step > 0 ? { start: d.baselineGrid.start, step: d.baselineGrid.step } : undefined,
     footnoteOptions: d.footnoteOptions || DEFAULT_FOOTNOTE_OPTIONS,
+    opticalMarginSize: d.opticalMarginSize || 12,
     ...extra,
   };
 }
@@ -103,6 +104,7 @@ export function storyOptions(pub: Pub, story: Story, boxes: FlowBox[], extra: Pa
   return layoutOptions(pub, boxes, {
     anchoredItem: (id: string): AnchoredInfo | undefined => { const e = anchored.get(id); return e && e.anchored ? { w: e.w, h: e.h, mode: e.anchored.mode, dx: e.anchored.dx, dy: e.anchored.dy, align: e.anchored.align, valign: e.anchored.valign } : undefined; },
     footnote: (id: string) => story.footnotes?.find((f) => f.id === id)?.paras,
+    opticalMargin: story.opticalMargin,
     ...extra,
   });
 }

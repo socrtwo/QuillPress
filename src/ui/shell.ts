@@ -10,7 +10,7 @@ import { PANES, type PaneDef } from './panes';
 import { customizeQat, customizeRibbon, customizeKeyboard } from './customize';
 import { renderBackstage } from './backstage';
 import { Workspace } from '../edit/workspace';
-import { FONT_LIST } from '../fonts';
+import { allFontFamilies, userFontFamilies } from '../fonts';
 import { currentRun } from '../edit/ops';
 import { QAT_STANDARD, QAT_EXTRAS } from '../prefs';
 import { UNITS } from '../model/types';
@@ -263,8 +263,10 @@ export class Shell {
       for (const st of this.app.pub.data.styles.para) if (st.run?.font) used.add(st.run.font);
       const entries: MenuEntry[] = [
         { heading: 'Publication Fonts' }, ...[...used].sort().map((f) => ({ arg: f, label: f, preview: `font-family:"${f}"` })),
-        { heading: 'All Fonts' }, ...FONT_LIST.map((f) => ({ arg: f, label: f, preview: `font-family:"${f}"` })),
       ];
+      const mine = userFontFamilies();
+      if (mine.length) entries.push({ heading: 'Your Fonts' }, ...mine.map((f) => ({ arg: f, label: f, preview: `font-family:"${f}"` })));
+      entries.push({ heading: 'All Fonts' }, ...allFontFamilies().map((f) => ({ arg: f, label: f, preview: `font-family:"${f}"` })));
       const input = h('input', { class: 'ql-menu-search', placeholder: 'Search fonts or type a name…' }) as HTMLInputElement;
       const m = showMenu(entries, { anchor: b, onPick: (e) => { this.app.exec('fmt.font', e.arg); this.app.focus(); }, className: 'ql-font-menu' });
       m.prepend(input);

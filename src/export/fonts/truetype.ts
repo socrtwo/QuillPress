@@ -1,7 +1,10 @@
 /**
- * A small TrueType reader for PDF embedding: metrics (head, hhea, hmtx, OS/2, post), the character
- * map (cmap formats 4 and 12), the PostScript name, and glyph subsetting (loca/glyf, with composite
- * components kept). Written from the OpenType specification; only what the PDF writer needs.
+ * A small TrueType / OpenType reader for PDF embedding and user fonts: metrics (head, hhea, hmtx,
+ * OS/2, post), the character map (cmap formats 4 and 12), the name table (family, subfamily,
+ * PostScript name), embedding permissions (OS/2 fsType), and glyph subsetting (loca/glyf, with
+ * composite components kept) for TrueType outlines. CFF-based OpenType fonts ("OTTO") are read for
+ * their metrics and names; their outlines are embedded whole. Written from the OpenType
+ * specification; only what QuillPress needs.
  */
 import { buildSfnt, tableChecksum, type SfntTable } from './woff';
 
@@ -21,12 +24,22 @@ export class TrueTypeFont {
   readonly psName: string;
   readonly numGlyphs: number;
   readonly indexToLocFormat: number;
+  /** Outlines are CFF (an "OTTO" OpenType font): no glyf/loca, so no subsetting. */
+  readonly cff: boolean;
+  /** OS/2 fsType embedding permissions (0 = installable). */
+  readonly fsType: number;
+  /** OS/2 fsSelection bit 0 or head macStyle bit 1: an italic face. */
+  readonly italic: boolean;
+  /** Name records by name id (typographic family 16, subfamily 17, family 1, subfamily 2, full 4, PostScript 6). */
+  readonly names = new Map<number, string>();
   private readonly cmap = new Map<number, number>();
   private readonly advances: number[];
   private readonly loca: number[];
 
   constructor(public readonly bytes: Uint8Array) {
     const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const tag0 = dv.getUint32(0);
+    this.cff = tag0 === 0x4f54544f; // 'OTTO'
     const numTables = dv.getUint16(4);
     for (let i = 0; i < numTables; i++) {
       const o = 12 + i * 16;
@@ -42,16 +55,18 @@ export class TrueTypeFont {
     this.indexToLocFormat = hd.getInt16(50);
     this.numGlyphs = view(maxp).getUint16(4);
     let ascent = hh.getInt16(4), descent = hh.getInt16(6);
-    let cap = 0, xh = 0, weight = 400;
+    let cap = 0, xh = 0, weight = 400, fsType = 0, italic = (hd.getUint16(44) & 2) !== 0;
     const os2 = this.table('OS/2');
     if (os2 && os2.length >= 78) {
       const o = view(os2);
       weight = o.getUint16(4) || 400;
+      fsType = o.getUint16(8);
+      italic = (o.getUint16(62) & 1) !== 0 || italic;
       const ta = o.getInt16(68), td = o.getInt16(70);
       if (ta) { ascent = ta; descent = td; }
       if (o.getUint16(0) >= 2 && os2.length >= 90) { xh = o.getInt16(86); cap = o.getInt16(88); }
     }
-    this.ascent = ascent; this.descent = descent; this.weightClass = weight;
+    this.ascent = ascent; this.descent = descent; this.weightClass = weight; this.fsType = fsType; this.italic = italic;
     this.capHeight = cap || Math.round(this.unitsPerEm * 0.7);
     this.xHeight = xh || Math.round(this.unitsPerEm * 0.5);
     const post = this.table('post');
@@ -73,9 +88,20 @@ export class TrueTypeFont {
       const n = this.numGlyphs + 1;
       for (let g = 0; g < n; g++) this.loca.push(this.indexToLocFormat === 0 ? (g * 2 + 2 <= loca.length ? lv.getUint16(g * 2) * 2 : 0) : (g * 4 + 4 <= loca.length ? lv.getUint32(g * 4) : 0));
     }
-    this.psName = this.readName() || 'Font';
+    this.readNames();
+    this.psName = (this.names.get(6) || '').replace(/[^\x21-\x7e]/g, '').replace(/[()<>[\]{}/%]/g, '') || 'Font';
     this.readCmap();
   }
+
+  /** The font's family name (typographic family when present). */
+  get family(): string { return (this.names.get(16) || this.names.get(1) || this.psName.split('-')[0] || 'Font').trim(); }
+  /** The style name ("Regular", "Bold Italic"…). */
+  get subfamily(): string { return (this.names.get(17) || this.names.get(2) || 'Regular').trim(); }
+  /**
+   * Whether the license bits allow embedding in documents: everything except "Restricted License"
+   * (bit 1 set without the preview/print or editable bits).
+   */
+  get embeddable(): boolean { return !((this.fsType & 0x0002) !== 0 && (this.fsType & 0x000c) === 0); }
 
   table(tag: string): Uint8Array | undefined { return this.tables.get(tag); }
 
@@ -88,23 +114,29 @@ export class TrueTypeFont {
   width1000(gid: number): number { return Math.round((this.advance(gid) * 1000) / this.unitsPerEm); }
   get glyphCount(): number { return this.numGlyphs; }
 
-  private readName(): string {
+  /** Reads the name table: Windows/Unicode records (UTF-16BE) win over Macintosh ones; English first. */
+  private readNames(): void {
     const name = this.table('name');
-    if (!name || name.length < 6) return '';
+    if (!name || name.length < 6) return;
     const dv = view(name);
     const count = dv.getUint16(2), strOff = dv.getUint16(4);
-    let best = '';
+    const rank = new Map<number, number>();
     for (let i = 0; i < count; i++) {
       const o = 6 + i * 12;
       if (o + 12 > name.length) break;
-      const platform = dv.getUint16(o), nameId = dv.getUint16(o + 6), len = dv.getUint16(o + 8), off = dv.getUint16(o + 10);
-      if (nameId !== 6) continue;
+      const platform = dv.getUint16(o), lang = dv.getUint16(o + 4), nameId = dv.getUint16(o + 6), len = dv.getUint16(o + 8), off = dv.getUint16(o + 10);
       const s = name.subarray(strOff + off, strOff + off + len);
-      if (s.length !== len) continue;
-      if (platform === 3 || platform === 0) { let t = ''; for (let k = 0; k + 1 < s.length; k += 2) t += String.fromCharCode((s[k] << 8) | s[k + 1]); best = t; break; }
-      if (platform === 1 && !best) best = String.fromCharCode(...s);
+      if (s.length !== len || !len) continue;
+      let text: string;
+      let r: number;
+      if (platform === 3 || platform === 0) {
+        let t = ''; for (let k = 0; k + 1 < s.length; k += 2) t += String.fromCharCode((s[k] << 8) | s[k + 1]);
+        text = t; r = platform === 3 && (lang === 0x409 || lang === 0) ? 3 : 2;
+      } else if (platform === 1) { text = macRoman(s); r = 1; } else continue;
+      text = text.replace(/\0/g, '').trim();
+      if (!text) continue;
+      if ((rank.get(nameId) ?? 0) < r) { rank.set(nameId, r); this.names.set(nameId, text); }
     }
-    return best.replace(/[^\x21-\x7e]/g, '').replace(/[()<>[\]{}/%]/g, '');
   }
 
   private readCmap(): void {
@@ -230,5 +262,13 @@ export class TrueTypeFont {
 }
 
 function view(u8: Uint8Array): DataView { return new DataView(u8.buffer, u8.byteOffset, u8.byteLength); }
+
+const MAC_HIGH = 'ÄÅÇÉÑÖÜáàâäãåçéèêëíìîïñóòôöõúùûü†°¢£§•¶ß®©™´¨≠ÆØ∞±≤≥¥µ∂∑∏π∫ªºΩæø¿¡¬√ƒ≈∆«»… ÀÃÕŒœ–—“”‘’÷◊ÿŸ⁄€‹›ﬁﬂ‡·‚„‰ÂÊÁËÈÍÎÏÌÓÔÒÚÛÙıˆ˜¯˘˙˚¸˝˛ˇ';
+/** Mac Roman bytes (the name table's Macintosh platform) as text. */
+export function macRoman(b: Uint8Array): string {
+  let s = '';
+  for (const c of b) s += c < 128 ? String.fromCharCode(c) : MAC_HIGH[c - 128] || '?';
+  return s;
+}
 
 export { tableChecksum };

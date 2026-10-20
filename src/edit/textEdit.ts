@@ -7,7 +7,8 @@
  * renderer underneath draws the real line breaks once editing ends.
  */
 import type { App } from '../app';
-import type { Paragraph, ParaProps, Run, RunProps, TextFrame, Story } from '../model/types';
+import type { Paragraph, ParaProps, Run, RunProps, TextFrame, Story, Footnote } from '../model/types';
+import { DEFAULT_FOOTNOTE_OPTIONS } from '../model/types';
 import { resolvePara, resolveRun, colorHex, runOverrides, paraOverrides } from '../model/styles';
 import { bulletText } from '../render/text';
 import { fontFamilyCss } from '../fonts';
@@ -18,29 +19,36 @@ export function activeTextEditor(): TextEditor | null { return active; }
 
 interface Pos { para: number; off: number }
 
+/** A footnote island: the editor binds to the note's paragraphs instead of the story's. */
+export interface FootnoteMode { id: string; label: string }
+
 export class TextEditor {
   root: HTMLDivElement;
   onDone: ((commit: boolean) => void) | null = null;
   changed = false;
   private pendingRun: RunProps | null = null;
+  /** Set while the island edits a footnote's text (over the note lines at the bottom of the column). */
+  readonly footnote: FootnoteMode | null;
 
-  constructor(public app: App, public frame: TextFrame, public story: Story, host: HTMLElement, box: { x: number; y: number; w: number; h: number; rot: number }, private selectAll = false) {
-    const ins = frame.insets || [4, 4, 4, 4];
+  constructor(public app: App, public frame: TextFrame, public story: Story, host: HTMLElement, box: { x: number; y: number; w: number; h: number; rot: number }, private selectAll = false, footnote?: FootnoteMode) {
+    this.footnote = footnote || null;
+    const ins = footnote ? [0, 0, 0, 0] : frame.insets || [4, 4, 4, 4];
     this.root = document.createElement('div');
-    this.root.className = 'qp-textedit';
+    this.root.className = footnote ? 'qp-textedit qp-fnedit' : 'qp-textedit';
     this.root.contentEditable = 'true';
     this.root.spellcheck = app.prefs.spellcheck;
     this.root.setAttribute('role', 'textbox');
     this.root.setAttribute('aria-multiline', 'true');
-    this.root.setAttribute('aria-label', frame.name || 'Text');
+    this.root.setAttribute('aria-label', footnote ? `Footnote ${footnote.label}` : frame.name || 'Text');
     const s = this.root.style;
     s.left = `${box.x}px`; s.top = `${box.y}px`; s.width = `${box.w}px`; s.minHeight = `${box.h}px`;
     s.padding = `${ins[1]}px ${ins[2]}px ${ins[3]}px ${ins[0]}px`;
     if (box.rot) s.transform = `rotate(${box.rot}deg)`;
-    if ((frame.columns || 1) > 1) { s.columnCount = String(frame.columns); s.columnGap = `${frame.gutter ?? 12}px`; }
-    s.display = (frame.columns || 1) > 1 ? 'block' : 'flex'; s.flexDirection = 'column';
-    s.justifyContent = frame.anchor === 'ctr' ? 'center' : frame.anchor === 'b' ? 'flex-end' : 'flex-start';
-    this.render(story.paras.length ? story.paras : [{ style: 'Body', runs: [] }]);
+    if (!footnote && (frame.columns || 1) > 1) { s.columnCount = String(frame.columns); s.columnGap = `${frame.gutter ?? 12}px`; }
+    s.display = !footnote && (frame.columns || 1) > 1 ? 'block' : 'flex'; s.flexDirection = 'column';
+    s.justifyContent = !footnote && frame.anchor === 'ctr' ? 'center' : !footnote && frame.anchor === 'b' ? 'flex-end' : 'flex-start';
+    const paras = footnote ? this.footnoteParas() : story.paras;
+    this.render(paras.length ? paras : [{ style: footnote ? this.footnoteStyle() : 'Body', runs: [] }]);
     host.appendChild(this.root);
     this.root.addEventListener('keydown', (e) => this.onKey(e));
     this.root.addEventListener('input', (e) => this.onInput(e as InputEvent));
@@ -53,6 +61,11 @@ export class TextEditor {
     });
   }
 
+  /** The footnote the island edits (footnote mode). */
+  footnoteOf(): Footnote | undefined { return this.footnote ? this.story.footnotes?.find((f) => f.id === this.footnote!.id) : undefined; }
+  private footnoteParas(): Paragraph[] { return this.footnoteOf()?.paras || []; }
+  private footnoteStyle(): string { return (this.app.pub.data.footnoteOptions || DEFAULT_FOOTNOTE_OPTIONS).style; }
+
   // ------------------------------------------------------------------------------------------
   // Model → DOM
 
@@ -61,7 +74,7 @@ export class TextEditor {
     const pub = this.app.pub.data;
     let prevKey = '';
     let counter = 0;
-    paras.forEach((p) => {
+    paras.forEach((p, pi) => {
       const rs = resolvePara(pub, p);
       const pp = rs.props;
       const d = document.createElement('div');
@@ -90,8 +103,18 @@ export class TextEditor {
       const hasText = p.runs.some((r) => r.text);
       const bt = bullet && bullet.kind !== 'none' && hasText ? bulletText(bullet, Math.max(0, counter - 1)) : '';
       if (bt) { d.dataset.bullet = bt; d.style.setProperty('--qp-hang', `${Math.max(0, -indent)}px`); }
+      if (this.footnote && pi === 0) {
+        // The reference label in front of the note (not editable, not read back).
+        const lb = document.createElement('span');
+        lb.className = 'qp-fnlabel';
+        lb.contentEditable = 'false';
+        lb.textContent = this.footnote.label + ' ';
+        d.appendChild(lb);
+      }
       for (const r of p.runs) {
         if (r.br) { d.appendChild(document.createElement('br')); continue; }
+        // A note holds neither anchored objects nor footnotes of its own.
+        if (this.footnote && (r.anchor || r.footnote)) continue;
         if (r.anchor) { d.appendChild(this.anchorSpan(r)); continue; }
         if (r.footnote) { d.appendChild(this.footnoteSpan(r)); continue; }
         if (!r.text) continue;
@@ -182,6 +205,7 @@ export class TextEditor {
       if (n.nodeType === 3) { const t = (n.nodeValue || '').replace(/ /g, ' ').replace(/​/g, ''); if (t) pushRun(p.runs, { ...props, text: t }); return; }
       if (n.nodeType !== 1) return;
       const e = n as HTMLElement;
+      if (e.classList.contains('qp-fnlabel')) return;
       if (e.tagName === 'BR') { p.runs.push({ text: '', br: true }); return; }
       if (/^(DIV|P)$/.test(e.tagName) && e !== d) p.runs.push({ text: '', br: true });
       const np = { ...props, ...this.propsOf(e) };
@@ -189,7 +213,8 @@ export class TextEditor {
     };
     for (const c of d.childNodes) walk(c, {});
     while (p.runs.length && p.runs[p.runs.length - 1].br) p.runs.pop();
-    if (!p.style && this.story.paras[0]?.style) p.style = this.story.paras[0].style;
+    if (this.footnote) { p.runs = p.runs.filter((r) => !r.anchor && !r.footnote); if (!p.style) p.style = this.footnoteStyle(); }
+    else if (!p.style && this.story.paras[0]?.style) p.style = this.story.paras[0].style;
     return p;
   }
 
@@ -396,6 +421,8 @@ export class TextEditor {
   private onKey(e: KeyboardEvent): void {
     if (e.key === 'Tab') {
       e.preventDefault();
+      // In a footnote, Tab returns to the reference (as Escape does); notes have no tab stops.
+      if (this.footnote) { e.stopPropagation(); this.finish(true); return; }
       document.execCommand('insertText', false, '\t');
       return;
     }

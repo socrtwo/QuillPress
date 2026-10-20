@@ -83,7 +83,7 @@ export const FONT_SCHEMES: { name: string; head: string; body: string }[] = [
 // ------------------------------------------------------------------------------------------
 // Resolution
 
-const PARA_KEYS: (keyof ParaProps)[] = ['align', 'marL', 'marR', 'indent', 'spaceBefore', 'spaceAfter', 'lineSpacing', 'lineSpacingPt', 'bullet', 'dropCap', 'keepWithNext', 'keepLines', 'hyphenate', 'gridAlign', 'tabs', 'ruleAbove', 'ruleBelow'];
+const PARA_KEYS: (keyof ParaProps)[] = ['align', 'marL', 'marR', 'indent', 'spaceBefore', 'spaceAfter', 'lineSpacing', 'lineSpacingPt', 'bullet', 'dropCap', 'keepWithNext', 'keepLines', 'hyphenate', 'gridAlign', 'opticalMargin', 'tabs', 'ruleAbove', 'ruleBelow'];
 const RUN_KEYS: (keyof RunProps)[] = ['b', 'i', 'u', 'strike', 'size', 'font', 'color', 'highlight', 'baseline', 'caps', 'spc', 'kern', 'liga', 'link', 'lang'];
 
 export function paraOverrides(p: Paragraph | ParaProps): ParaProps {

@@ -108,6 +108,8 @@ export interface ParaProps {
   hyphenate?: boolean;
   /** Snap baselines to the publication's baseline grid. */
   gridAlign?: boolean;
+  /** Optical margin alignment: punctuation and open-sided glyphs hang outside the margins. */
+  opticalMargin?: boolean;
   tabs?: Tab[];
   /** Rule above / below. */
   ruleAbove?: { width: number; color: Color; offset?: number };
@@ -155,6 +157,8 @@ export interface Story {
   name?: string;
   /** Footnotes referenced by runs with `footnote` (set at the bottom of the column holding the reference). */
   footnotes?: Footnote[];
+  /** Optical margin alignment for the whole story (a paragraph's own setting wins). */
+  opticalMargin?: boolean;
 }
 
 export interface FootnoteOptions {
@@ -289,6 +293,8 @@ export interface TableItem extends ItemBase {
   border?: Line;
   innerBorder?: Line;
   style?: { firstRow?: boolean; bandedRows?: boolean; firstCol?: boolean; bandColor?: Color; headerFill?: Fill };
+  /** Footnotes referenced from the cells; set in a note area under the rows, numbered per table in reading order. */
+  footnotes?: Footnote[];
 }
 
 export interface GroupItem extends ItemBase {
@@ -315,6 +321,8 @@ export interface PathTextItem extends ItemBase {
   showPath?: boolean;
   /** Preset name the path was made from (line, arcUp, arcDown, circle, wave, zigzag, shape). */
   preset?: string;
+  /** Footnotes referenced from the text; set in a note area below the item's box. */
+  footnotes?: Footnote[];
 }
 
 export type Item = TextFrame | PictureFrame | ShapeItem | LineItem | TableItem | GroupItem | PathTextItem;
@@ -400,6 +408,8 @@ export interface Publication {
   qat?: string[];
   /** Footnote numbering and placement. */
   footnoteOptions?: FootnoteOptions;
+  /** Reference size (points) that scales the optical margin overhang; default 12. */
+  opticalMarginSize?: number;
 }
 
 export interface MediaItem { mime: string; b64: string; name?: string; w?: number; h?: number; dpi?: number }

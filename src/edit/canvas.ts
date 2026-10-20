@@ -6,8 +6,10 @@
  */
 import type { App } from '../app';
 import type { Item, TextFrame } from '../model/types';
+import { DEFAULT_FOOTNOTE_OPTIONS } from '../model/types';
 import { clone } from '../model/pub';
 import { pageSvg, type Owner } from '../render/page';
+import { storyLayout } from '../render/flow';
 import { edit, setBox, boxOf, deleteSelection, nudge, isPage, type Box, linkFrames, fitFrameHeight } from './ops';
 import { TextEditor, activeTextEditor } from './textEdit';
 import { h } from '../ui/dom';
@@ -120,7 +122,7 @@ export class Canvas {
       }
     }
     const hide = new Set<string>();
-    if (this.editor) hide.add(this.editor.frame.id);
+    if (this.editor && !this.editor.footnote) hide.add(this.editor.frame.id);
     const p = this.app.prefs;
     const t = this.app.tab;
     const preview = t.view === 'preview';
@@ -444,7 +446,12 @@ export class Canvas {
     if (this.editor && this.editor.root.contains(e.target as Node)) return;
     const hit = this.hit(e.target, this.pt(e));
     if (!hit) return;
-    if (hit.kind === 'text') this.editText(hit.id);
+    if (hit.kind === 'text') {
+      // Double-clicking a note at the bottom of the column edits that footnote in place.
+      const noteEl = (e.target as Element | null)?.closest?.('text[data-fn]') as (SVGElement & { dataset: DOMStringMap }) | null;
+      if (noteEl?.dataset.fn && !this.app.prefs.touchMode && this.editFootnote(hit.id, noteEl.dataset.fn)) return;
+      this.editText(hit.id);
+    }
     else if (hit.kind === 'pathText') this.app.exec('path.editText');
     else if (hit.kind === 'table') this.app.exec('table.editCells');
     else if (hit.kind === 'picture') this.app.exec(hit.media ? 'picture.fitting' : 'picture.place');
@@ -474,6 +481,50 @@ export class Canvas {
 
   get editingText(): boolean { return !!this.editor; }
 
+  /**
+   * Opens a second island over a footnote's lines at the bottom of its column, bound to the note's
+   * paragraphs. The frame's body stays visible (only the note lines are hidden under the island).
+   * Returns false when the note has no laid lines (overset, or the reference is not placed yet).
+   */
+  editFootnote(frameId: string, fnId: string): boolean {
+    const pub = this.app.pub;
+    if (this.app.isReadOnly()) return false;
+    const frame0 = pub.frame(frameId);
+    const story = frame0 ? pub.story(frame0.story) : undefined;
+    const fn = story?.footnotes?.find((f) => f.id === fnId);
+    if (!story || !fn) return false;
+    const lay = storyLayout(pub, story.id);
+    const lines = lay?.r.lines.filter((l) => l.footnote && l.footnoteId === fnId) || [];
+    if (!lay || !lines.length) return false;
+    const bx = lay.boxes[lines[0].box];
+    const pg = pub.pageOfItem(bx.frame);
+    if (pg && this.owner?.id !== pg.id) this.app.goToPage(pg.id);
+    const o = this.owner;
+    const frame = o && pub.findItem(o, bx.frame);
+    if (!frame || frame.kind !== 'text') return false;
+    if (this.editor) this.commitText();
+    const top = Math.min(...lines.map((l) => l.y - l.height * 0.8)) - 1;
+    const bottom = Math.max(...lines.map((l) => l.y + l.height * 0.2)) + 1;
+    const label = lay.r.footnoteLabels?.[fnId] || '';
+    this.selection = [frame.id];
+    this.editor = new TextEditor(this.app, frame, story, this.overlay, { x: bx.x + this.pad, y: top + this.pad, w: bx.w, h: bottom - top, rot: 0 }, false, { id: fnId, label });
+    this.editor.onDone = (commit) => {
+      if (commit) this.commitText(); else this.cancelText();
+      // Back to the reference: the main island reopens with the caret after it.
+      this.app.exec('text.goToReference', fnId);
+    };
+    this.renderedKey = '';
+    this.render();
+    this.hideNoteLines(fnId);
+    this.app.refresh();
+    return true;
+  }
+
+  /** Hides the drawn lines of a footnote while its island is open. */
+  private hideNoteLines(fnId: string): void {
+    for (const t of this.pageHost.querySelectorAll<SVGElement>('text[data-fn]')) if (t.dataset.fn === fnId) t.style.visibility = 'hidden';
+  }
+
   commitText(): void {
     const ed = this.editor;
     if (!ed) return;
@@ -482,6 +533,17 @@ export class Canvas {
     ed.destroy();
     const pub = this.app.pub;
     const story = pub.story(ed.story.id);
+    if (ed.footnote) {
+      // Footnote island: write the note's paragraphs in one step.
+      const fn = story?.footnotes?.find((f) => f.id === ed.footnote!.id);
+      const next = paras.length ? paras : [{ style: (pub.data.footnoteOptions || DEFAULT_FOOTNOTE_OPTIONS).style, runs: [] }];
+      if (fn && JSON.stringify(next) !== JSON.stringify(fn.paras)) {
+        const pages = pub.chainOf(story!.id).map((f) => pub.pageOfItem(f.id)?.id).filter(Boolean) as string[];
+        pub.transact('Edit Footnote', () => { fn.paras = next; }, pages.length && !this.app.tab.masterTarget ? [...new Set(pages)] : undefined);
+      } else { this.renderedKey = ''; this.render(); }
+      this.app.refresh();
+      return;
+    }
     const before = JSON.stringify(story?.paras || []);
     if (story && JSON.stringify(paras) !== before) {
       const frames = pub.chainOf(story.id);

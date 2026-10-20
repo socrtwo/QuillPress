@@ -16,17 +16,33 @@
  *   adds tracking; `flip` sets the text on the other side of the path, running the other way.
  * - Characters past the end of the path are dropped (`overflow` reports how many).
  */
-import type { PathTextItem, Paragraph, RunProps } from '../model/types';
+import type { PathTextItem, Paragraph, RunProps, FootnoteOptions } from '../model/types';
+import { DEFAULT_FOOTNOTE_OPTIONS } from '../model/types';
 import { flattenPath, polyline, pointAt, reversed, type Pt } from '../model/pathGeom';
-import { measure as defaultMeasure, cssFont, type MeasureFn, type ResolvedParaStyle } from './text';
+import { measure as defaultMeasure, cssFont, footnoteLabel, labeledFootnote, layoutStory, type MeasureFn, type ResolvedParaStyle, type LayoutOptions, type LaidLine, type FlowBox } from './text';
 
-export interface PathGlyph { ch: string; x: number; y: number; angle: number; w: number; size: number; font: string; style: RunProps }
+export interface PathGlyph { ch: string; x: number; y: number; angle: number; w: number; size: number; font: string; style: RunProps; /** The footnote this glyph is the reference label of. */ footnote?: string }
 
 export interface PathTextOptions {
   resolve: (p: Paragraph) => ResolvedParaStyle;
   resolveRun: (base: RunProps, r: RunProps) => RunProps;
   font?: (f: string | undefined) => string;
   measure?: MeasureFn;
+  footnoteOptions?: FootnoteOptions;
+}
+
+/** Footnote ids referenced from the item's text, in order. */
+export function pathTextFootnoteRefs(item: PathTextItem): string[] {
+  const ids: string[] = [];
+  for (const p of item.text) for (const r of p.runs) if (r.footnote) ids.push(r.footnote);
+  return ids;
+}
+
+/** The label of every footnote referenced from the item (numbered per item with the publication's scheme). */
+export function pathTextFootnoteLabels(item: PathTextItem, fnOpts: FootnoteOptions = DEFAULT_FOOTNOTE_OPTIONS): Record<string, string> {
+  const out: Record<string, string> = {};
+  pathTextFootnoteRefs(item).forEach((id, i) => { out[id] = footnoteLabel(i + 1, fnOpts.scheme); });
+  return out;
 }
 
 export const PATH_TEXT_PRESETS: Record<string, { label: string; d: string; w: number; h: number; box: [number, number] }> = {
@@ -62,15 +78,25 @@ export function localToPage(item: PathTextItem, p: Pt): Pt {
 }
 
 /** Text of the item as one string with the resolved style of each character. */
-function chars(item: PathTextItem, o: PathTextOptions): { ch: string; style: RunProps; size: number; font: string; css: string }[] {
+function chars(item: PathTextItem, o: PathTextOptions): { ch: string; style: RunProps; size: number; font: string; css: string; footnote?: string; raise?: number }[] {
   const fontOf = o.font || ((f) => f || 'Tinos');
-  const out: { ch: string; style: RunProps; size: number; font: string; css: string }[] = [];
+  const out: { ch: string; style: RunProps; size: number; font: string; css: string; footnote?: string; raise?: number }[] = [];
+  const labels = pathTextFootnoteLabels(item, o.footnoteOptions);
   item.text.forEach((p, pi) => {
     const base = o.resolve(p).run;
     if (pi > 0) { const s = o.resolveRun(base, p.end || {}); const size = s.size ?? 10.5; const fam = fontOf(s.font); out.push({ ch: ' ', style: s, size, font: fam, css: cssFont(s, size, fam) }); }
     for (const r of p.runs) {
       if (r.br) continue;
       const s = o.resolveRun(base, r);
+      if (r.footnote) {
+        // The reference label: a superscript glyph (smaller, raised along the path normal).
+        const label = labels[r.footnote] || r.text || '1';
+        if (r.text !== label) r.text = label;
+        const size = (s.size ?? 10.5) * 0.67;
+        const fam = fontOf(s.font);
+        for (const ch of label) out.push({ ch, style: s, size, font: fam, css: cssFont(s, size, fam), footnote: r.footnote, raise: size * 0.5 });
+        continue;
+      }
       const size = (s.size ?? 10.5) * (s.baseline ? 0.67 : 1);
       const fam = fontOf(s.font);
       const css = cssFont(s, size, fam);
@@ -109,19 +135,52 @@ export function pathTextLayout(item: PathTextItem, o: PathTextOptions): PathText
     const p = pointAt(pl, mid);
     // Shift along the normal: the left of the direction of travel is "above" the path.
     const nx = Math.sin(p.angle), ny = -Math.cos(p.angle);
-    const local = { x: p.x + nx * item.baseline, y: p.y + ny * item.baseline };
+    const local = { x: p.x + nx * (item.baseline + (c.raise || 0)), y: p.y + ny * (item.baseline + (c.raise || 0)) };
     const pageP = localToPage(item, local);
     // The angle comes from the page-space tangent, so rotation and flips of the item are honored.
     const ahead = localToPage(item, { x: local.x + Math.cos(p.angle), y: local.y + Math.sin(p.angle) });
     let angle = (Math.atan2(ahead.y - pageP.y, ahead.x - pageP.x) * 180) / Math.PI;
     angle = ((angle % 360) + 360) % 360;
-    if (c.ch.trim()) glyphs.push({ ch: c.ch, x: pageP.x, y: pageP.y, angle, w, size: c.size, font: c.font, style: c.style });
+    if (c.ch.trim()) glyphs.push({ ch: c.ch, x: pageP.x, y: pageP.y, angle, w, size: c.size, font: c.font, style: c.style, ...(c.footnote ? { footnote: c.footnote } : {}) });
     s += w + gap;
   });
   return { glyphs, overflow, length: pl.length };
 }
 
 export function pathTextGlyphs(item: PathTextItem, o: PathTextOptions): PathGlyph[] { return pathTextLayout(item, o).glyphs; }
+
+export interface PathTextNotes {
+  /** Note lines in the item's LOCAL box (the renderer's group transform places them with the item). */
+  lines: LaidLine[];
+  /** Separator rule above the notes, local coordinates. */
+  separator?: { x: number; y: number; w: number };
+  /** Height of the note area under the item's box (0 without notes). */
+  h: number;
+}
+
+/**
+ * The footnotes of a path text item, set in a note area below the item's box: full item width, a
+ * separator above, numbered as the references are. Local coordinates (y grows from item.h).
+ */
+export function pathTextNotes(item: PathTextItem, o: Omit<LayoutOptions, 'boxes'>): PathTextNotes {
+  const fnOpts = o.footnoteOptions || DEFAULT_FOOTNOTE_OPTIONS;
+  const labels = pathTextFootnoteLabels(item, fnOpts);
+  const present = pathTextFootnoteRefs(item).filter((id) => (item.footnotes || []).some((f) => f.id === id));
+  if (!present.length) return { lines: [], h: 0 };
+  const sepTotal = fnOpts.separator.space + 2;
+  const w = Math.max(1, item.w);
+  const separator = { x: 0, y: item.h + fnOpts.separator.space * 0.5, w: w * Math.max(0, Math.min(1, fnOpts.separator.length)) };
+  const lines: LaidLine[] = [];
+  let y = item.h + sepTotal;
+  for (const id of present) {
+    const fn = item.footnotes!.find((f) => f.id === id)!;
+    const box: FlowBox = { frame: item.id, col: 0, x: 0, y, w, h: 1e6 };
+    const r = layoutStory(labeledFootnote(fn.paras, labels[id], fnOpts.style), { ...o, boxes: [box], unbounded: true, anchor: undefined, grid: undefined, footnote: undefined, anchoredItem: undefined });
+    for (const l of r.lines) { l.footnote = true; l.footnoteId = id; lines.push(l); }
+    y += r.used;
+  }
+  return { lines, separator, h: y - item.h + 2 };
+}
 
 /** Plain text of a path text item. */
 export function pathTextString(item: PathTextItem): string {

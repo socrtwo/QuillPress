@@ -112,6 +112,10 @@ export interface LaidLine {
   anchors?: { id: string; x: number; y: number; ax: number; ay: number }[];
   /** A line of footnote text at the bottom of the box (para indexes the footnote's paragraphs). */
   footnote?: boolean;
+  /** The footnote the line belongs to (note lines only). */
+  footnoteId?: string;
+  /** Optical margin: how far the first/last glyph hangs outside the margin (left, right). */
+  hang?: [number, number];
 }
 
 export interface LayoutResult {
@@ -126,6 +130,8 @@ export interface LayoutResult {
   separators: { box: number; x: number; y: number; w: number }[];
   /** The label given to each footnote referenced. */
   footnoteLabels?: Record<string, string>;
+  /** Footnotes numbered so far (footnoteStart plus the references laid). */
+  footnoteCount: number;
 }
 
 export interface ResolvedParaStyle { props: ParaProps; run: RunProps }
@@ -154,6 +160,12 @@ export interface LayoutOptions {
   /** Paragraphs of a footnote by id. */
   footnote?: (id: string) => Paragraph[] | undefined;
   footnoteOptions?: FootnoteOptions;
+  /** Footnote numbering continues from this count (references in earlier cells of a table). */
+  footnoteStart?: number;
+  /** Optical margin alignment for every paragraph (a paragraph's own setting wins). */
+  opticalMargin?: boolean;
+  /** Reference size (points) scaling the optical overhang; default 12. */
+  opticalMarginSize?: number;
 }
 
 export const cssFont = (st: RunProps, size: number, family: string) => `${st.i ? 'italic ' : ''}${st.b ? 'bold ' : ''}${Math.max(0.5, size)}px "${family}"`;
@@ -242,9 +254,34 @@ export function footnoteLabel(n: number, scheme: FootnoteOptions['scheme']): str
 }
 
 /** The footnote's paragraphs with the reference label set in front of the first one. */
-function labeledFootnote(paras: Paragraph[], label: string, style: string): Paragraph[] {
+export function labeledFootnote(paras: Paragraph[], label: string, style: string): Paragraph[] {
   const out = paras.map((p, i) => ({ ...p, style: p.style || style, runs: i === 0 ? [{ text: label, cstyle: 'Footnote Reference', baseline: 33 } as Run, { text: ' ' } as Run, ...p.runs] : [...p.runs] }));
   return out.length ? out : [{ style, runs: [{ text: label, cstyle: 'Footnote Reference', baseline: 33 }] }];
+}
+
+// ------------------------------------------------------------------------------------------
+// Optical margin alignment: punctuation and open-sided glyphs hang outside the margin by a fraction
+// of their width so the edge of the text looks straight.
+
+const HANG_FULL = new Set(['.', ',', '\'', '’', '‘', '"', '“', '”', '‚', '„', '·', '•', '‹', '›', '`', '´']);
+const HANG_HALF = new Set(['-', '–', '—', ';', ':', '!', '?', '«', '»', '*', '°']);
+const HANG_LETTER_LEFT = new Set(['A', 'V', 'W', 'Y', 'T', 'v', 'w', 'y', 'J']);
+const HANG_LETTER_RIGHT = new Set(['A', 'V', 'W', 'Y', 'T', 'v', 'w', 'y', 'r', 'f', 'L']);
+
+/** Fraction of a glyph's width that hangs outside the margin on the given side. */
+export function hangFraction(ch: string, side: 'left' | 'right'): number {
+  if (!ch) return 0;
+  if (HANG_FULL.has(ch)) return 1;
+  if (HANG_HALF.has(ch)) return 0.5;
+  if ((side === 'left' ? HANG_LETTER_LEFT : HANG_LETTER_RIGHT).has(ch)) return 0.2;
+  return 0;
+}
+
+/** The overhang in points of a glyph of `size` points measuring `w` wide, for a reference size. */
+export function hangAmount(ch: string, side: 'left' | 'right', w: number, size: number, refSize: number): number {
+  const f = hangFraction(ch, side);
+  if (!f || w <= 0) return 0;
+  return Math.min(w, f * w * (refSize / Math.max(1, size)));
 }
 
 /**
@@ -277,8 +314,9 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
   const fnPending: LaidLine[][] = o.boxes.map(() => []);
   const separators: LayoutResult['separators'] = [];
   const footnoteLabels: Record<string, string> = {};
-  let fnCount = 0;
+  let fnCount = o.footnoteStart ?? 0;
   let fnPage = -2;
+  const opticalSize = o.opticalMarginSize || 12;
   /** The box whose bottom receives the footnotes referenced from box k. */
   const fnTarget = (k: number): number => {
     if (fnOpts.placement !== 'frame') return k;
@@ -445,7 +483,7 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
           if (!fp) continue;
           const tb = o.boxes[target];
           const sub = layoutStory(labeledFootnote(fp, label, fnOpts.style), { ...o, boxes: [{ frame: tb.frame, col: tb.col, x: tb.x, y: 0, w: tb.w, h: 1e6, page: tb.page }], unbounded: true, anchor: undefined, grid: undefined, footnote: undefined, anchoredItem: undefined });
-          for (const l of sub.lines) { l.y += fnH; l.box = target; l.footnote = true; fnLines.push(l); }
+          for (const l of sub.lines) { l.y += fnH; l.box = target; l.footnote = true; l.footnoteId = t.footnote; fnLines.push(l); }
           fnH += sub.used;
         }
       }
@@ -485,6 +523,22 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
       }
       let width = x;
       let left = x0;
+      // Optical margin alignment: hang the first and last glyph outside the margin.
+      let hangL = 0, hangR = 0;
+      if (st.opticalMargin ?? o.opticalMargin) {
+        const textSegs = segs.filter((sg) => sg.text && !sg.anchor && !sg.footnote && !/^\s+$/.test(sg.text));
+        const fs = textSegs[0], ls = textSegs[textSegs.length - 1];
+        if (fs && !(first && (bText || dropSeg)) && fs.x < 0.01) {
+          const ch = [...fs.text][0];
+          hangL = hangAmount(ch, 'left', m(ch, fs.css), fs.size, opticalSize);
+        }
+        if (ls) {
+          const chars = [...ls.text];
+          const ch = chars[chars.length - 1];
+          hangR = hangAmount(ch, 'right', m(ch, ls.css), ls.size, opticalSize);
+        }
+        x0 -= hangL; left = x0; avail += hangL + hangR;
+      }
       const justify = (align === 'just' && !last) || align === 'justAll';
       if (justify && spaces > 0 && width < avail) {
         const extra = (avail - width) / spaces;
@@ -497,6 +551,7 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
       const endTok = lineToks[lineToks.length - 1];
       const end = endTok ? endTok.off + endTok.text.length + (endTok.br ? 1 : 0) : start;
       const ll: LaidLine = { box: bi, segs, y: baseline, x: left, width, height: g.above + g.below, ascent: g.ascent, para: pi, first, last, align, start, end };
+      if (hangL || hangR) ll.hang = [hangL, hangR];
       if (first && bText) ll.bullet = { text: bText, x: box.x + bX, size: bSize, font: bFont, css: bCss, color: bullet?.color || firstTok?.style.color || baseRun.color };
       if (first && dropSeg) { dropSeg.x = box.x + (first ? marL : marL) - left; ll.segs.unshift({ ...dropSeg, x: (box.x + marL) - left }); }
       // Anchored objects: where each one goes, from the token's place on the line.
@@ -630,7 +685,7 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
     else if (o.anchor === 'just' && body.length > 1) { const gap = extra / (body.length - 1); body.forEach((l, i) => { l.y += gap * i; }); }
     for (const l of lines) if (l.anchors) for (const a of l.anchors) { const d = l.y - a.ay; a.y += d; a.ay = l.y; }
   }
-  return { lines, overset, perBox, used, separators, footnoteLabels };
+  return { lines, overset, perBox, used, separators, footnoteLabels, footnoteCount: fnCount };
 }
 
 /** Plain-text words count. */

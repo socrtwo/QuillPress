@@ -15,7 +15,9 @@ import type { Item, Page, Fill, Line, TextFrame, Master, Paragraph, PathTextItem
 import { colorHex } from '../model/styles';
 import { geometryPath } from '../model/geometry';
 import { frameBoxes, frameLines, layoutOptions, syncAnchors } from '../render/flow';
-import { pathTextLayout, pathPolyline, localToPage } from '../render/pathText';
+import { pathTextLayout, pathPolyline, localToPage, pathTextNotes } from '../render/pathText';
+import { tableLayout } from '../render/table';
+import { DEFAULT_FOOTNOTE_OPTIONS } from '../model/types';
 import { layoutStory, type LaidLine, type FlowBox } from '../render/text';
 import { unb64 } from '../io/xml';
 import { decodePng } from '../io/png';
@@ -434,6 +436,18 @@ async function pathTextOps(ctx: Ctx, e: PathTextItem, out: string[]): Promise<vo
     const ox = g.x - (g.w / 2) * Math.cos(a), oy = g.y - (g.w / 2) * Math.sin(a);
     out.push(await textOps(ctx, g.ch, g.font, st.b, st.i, g.size, ox, oy, rgb(colorHex(pub.data, st.color)), 0, st.caps, g.angle));
   }
+  // Footnotes: the note area under the item's box, in the item's local coordinates (position, rotation, flips).
+  const notes = pathTextNotes(e, layoutOptions(pub, []));
+  if (notes.lines.length) {
+    const cx = e.w / 2, cy = e.h / 2;
+    out.push(`q 1 0 0 1 ${n(e.x)} ${n(e.y)} cm`);
+    if (e.rot) { const a = (e.rot * Math.PI) / 180; out.push(`1 0 0 1 ${n(cx)} ${n(cy)} cm ${n(Math.cos(a))} ${n(Math.sin(a))} ${n(-Math.sin(a))} ${n(Math.cos(a))} 0 0 cm 1 0 0 1 ${n(-cx)} ${n(-cy)} cm`); }
+    if (e.flipH || e.flipV) out.push(`1 0 0 1 ${n(cx)} ${n(cy)} cm ${e.flipH ? -1 : 1} 0 0 ${e.flipV ? -1 : 1} 0 0 cm 1 0 0 1 ${n(-cx)} ${n(-cy)} cm`);
+    const fo = pub.data.footnoteOptions || DEFAULT_FOOTNOTE_OPTIONS;
+    const sp = notes.separator;
+    if (sp && sp.w > 0 && fo.separator.width > 0) out.push(`q 0 G ${n(fo.separator.width)} w ${n(sp.x)} ${n(sp.y)} m ${n(sp.x + sp.w)} ${n(sp.y)} l S Q`);
+    out.push(await linesOps(ctx, notes.lines), 'Q');
+  }
   out.push('Q');
 }
 
@@ -505,31 +519,14 @@ async function itemOps(ctx: Ctx, e: Item, owner: Page | Master, fromMaster: bool
       break;
     }
     case 'table': {
-      let y = 0;
       const cols = e.cols;
-      const totalW = cols.reduce((a, b) => a + b, 0), totalH = e.rows.reduce((a, r) => a + r.h, 0);
+      const tl = tableLayout(pub, e, ctx.pageIndex);
+      const totalW = tl.w, totalH = tl.rowsH;
       out.push(`q 1 0 0 1 ${n(e.x)} ${n(e.y)} cm`);
-      for (let ri = 0; ri < e.rows.length; ri++) {
-        const row = e.rows[ri];
-        let x = 0;
-        for (let ci = 0; ci < row.cells.length; ci++) {
-          const cell = row.cells[ci];
-          const cw = cols[ci] || 0;
-          if (cell.merged) { x += cw; continue; }
-          const span = cell.colSpan || 1, rspan = cell.rowSpan || 1;
-          const w = cols.slice(ci, ci + span).reduce((a, b) => a + b, 0), h = e.rows.slice(ri, ri + rspan).reduce((a, r) => a + r.h, 0);
-          const band = e.style?.bandedRows && ri % 2 === 1 ? ({ type: 'solid', color: e.style.bandColor || 'Light Gray' } as Fill) : undefined;
-          const header = (e.style?.firstRow && ri === 0) || row.header ? (e.style?.headerFill || ({ type: 'solid', color: 'Primary' } as Fill)) : undefined;
-          const cf = fillOp(ctx, cell.fill ?? header ?? band);
-          if (cf) out.push(`q ${cf} ${n(x)} ${n(y)} ${n(w)} ${n(h)} re f Q`);
-          const ins = cell.insets || [4, 3, 4, 3];
-          const box: FlowBox = { frame: e.id, col: 0, x: x + ins[0], y: y + ins[1], w: Math.max(1, w - ins[0] - ins[2]), h: Math.max(1, h - ins[1] - ins[3]), page: ctx.pageIndex };
-          const paras: Paragraph[] = cell.text.length ? cell.text : [{ style: 'Table Text', runs: [] }];
-          const r = layoutStory(paras, layoutOptions(pub, [box], { anchor: cell.anchor || 't', unbounded: true }));
-          out.push(`q ${n(x)} ${n(y)} ${n(w)} ${n(h)} re W n`, await linesOps(ctx, r.lines), 'Q');
-          x += cw;
-        }
-        y += row.h;
+      for (const c of tl.cells) {
+        const cf = fillOp(ctx, c.fill);
+        if (cf) out.push(`q ${cf} ${n(c.x)} ${n(c.y)} ${n(c.w)} ${n(c.h)} re f Q`);
+        out.push(`q ${n(c.x)} ${n(c.y)} ${n(c.w)} ${n(c.h)} re W n`, await linesOps(ctx, c.lines), 'Q');
       }
       const inner = strokeOp(ctx, e.innerBorder ?? { fill: { type: 'solid', color: 'Gray' }, width: 0.5 });
       if (inner) {
@@ -538,6 +535,13 @@ async function itemOps(ctx: Ctx, e: Item, owner: Page | Master, fromMaster: bool
       }
       const outer = strokeOp(ctx, e.border ?? { fill: { type: 'solid', color: 'Black' }, width: 0.75 });
       if (outer) out.push(`q ${outer} 0 0 ${n(totalW)} ${n(totalH)} re S Q`);
+      // Footnotes referenced from the cells: the note area under the rows.
+      if (tl.notes.length) {
+        const fo = pub.data.footnoteOptions || DEFAULT_FOOTNOTE_OPTIONS;
+        const sp = tl.separator;
+        if (sp && sp.w > 0 && fo.separator.width > 0) out.push(`q 0 G ${n(fo.separator.width)} w ${n(sp.x)} ${n(sp.y)} m ${n(sp.x + sp.w)} ${n(sp.y)} l S Q`);
+        out.push(await linesOps(ctx, tl.notes));
+      }
       out.push('Q');
       break;
     }

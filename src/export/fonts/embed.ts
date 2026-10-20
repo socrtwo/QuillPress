@@ -1,12 +1,14 @@
 /**
- * Font embedding for the PDF writer. Each face the publication uses (family × weight × style) that
- * QuillPress bundles becomes a Type0 font with an Identity-H encoding over a CIDFontType2 whose
- * FontFile2 is a TrueType subset of the bundled WOFF (only the glyphs on the pages). A ToUnicode map
- * keeps text searchable and copyable. Families QuillPress does not bundle fall back to the standard
- * 14 fonts in the writer; aliases (Arial → Arimo, Times New Roman → Tinos, Calibri → Carlito…) use
- * the metric-compatible bundled face, as the screen does.
+ * Font embedding for the PDF writer. Each face the publication uses (family × weight × style) becomes
+ * a Type0 font with an Identity-H encoding: the user's own fonts first (TrueType outlines as a subset
+ * in a CIDFontType2 / FontFile2, CFF-based OpenType whole in a CIDFontType0 / FontFile3), then the
+ * bundled WOFF faces as TrueType subsets. A ToUnicode map keeps text searchable and copyable. Families
+ * that are neither fall back to the standard 14 fonts in the writer; aliases (Arial → Arimo, Times
+ * New Roman → Tinos, Calibri → Carlito…) use the metric-compatible bundled face, as the screen does.
+ * Fonts whose license bits forbid embedding (OS/2 fsType "Restricted License") and WOFF2 files, which
+ * cannot be converted offline, fall back too, with a warning.
  */
-import { FACES } from '../../fonts';
+import { FACES, userFaces, userFontBytes, type UserFont } from '../../fonts';
 import { woffSource } from './sources';
 import { woffToSfnt } from './woff';
 import { TrueTypeFont } from './truetype';
@@ -24,6 +26,8 @@ export interface EmbeddedFace {
   synthItalic: boolean;
   /** Glyph ids used so far, with the first code point seen for each (for ToUnicode). */
   used: Map<number, number>;
+  /** A user-supplied font (its id), embedded from the registry's bytes. */
+  user?: UserFont;
   /** PDF object number of the Type0 font once reserved, and its resource name. */
   obj: number;
   res: string;
@@ -92,8 +96,15 @@ export class PdfFonts {
 
   constructor(private loader: FontLoader = defaultLoader, private onWarning?: (msg: string) => void) {}
 
-  /** The embedded face for a font name and style, or null when the family is not bundled or failed to load. */
+  /** The embedded face for a font name and style, or null when the family is neither the user's nor bundled, or failed to load. */
   face(name: string | undefined, bold?: boolean, italic?: boolean): Promise<EmbeddedFace | null> {
+    const mine = userFaces(name);
+    if (mine.length) {
+      const key = `user:${mine[0].family}|${bold ? 700 : 400}|${italic ? 'italic' : 'normal'}`;
+      let p = this.faces.get(key);
+      if (!p) { p = this.loadUser(mine, bold ? 700 : 400, italic ? 'italic' : 'normal', key); this.faces.set(key, p); }
+      return p;
+    }
     const family = bundledFamily(name);
     if (!family) return Promise.resolve(null);
     const key = `${family}|${bold ? 700 : 400}|${italic ? 'italic' : 'normal'}`;
@@ -104,6 +115,38 @@ export class PdfFonts {
     }
     return p;
   }
+
+  /** Picks the user's face closest to the requested weight and style; synthesizes bold or italic when the family lacks them. */
+  private async loadUser(faces: UserFont[], weight: 400 | 700, style: 'normal' | 'italic', key: string): Promise<EmbeddedFace | null> {
+    const family = faces[0].family;
+    const score = (f: UserFont) => Math.abs(f.weight - weight) + (f.style === style ? 0 : 1000);
+    const sorted = [...faces].sort((a, b) => score(a) - score(b));
+    const chosen = sorted[0];
+    if (chosen.format === 'woff2') { this.warn(`${family}: WOFF2 fonts cannot be embedded in PDF (no converter offline); text set in it uses a standard font. Add the TrueType or OpenType file to embed it.`); return null; }
+    if (!chosen.embeddable) { this.warn(`${family}: the font's license bits forbid embedding; text set in it uses a standard font.`); return null; }
+    const bytes = userFontBytes(chosen.id);
+    if (!bytes) return null;
+    try {
+      let p = this.userCache.get(chosen.id);
+      if (!p) {
+        p = (async () => {
+          const { parseFontFile } = await import('./fontfile');
+          const parsed = await parseFontFile(bytes, chosen.file);
+          if (!parsed.font) throw new Error('not parsable');
+          return parsed.font;
+        })();
+        this.userCache.set(chosen.id, p);
+      }
+      const font = await p;
+      const synthBold = weight >= 700 && chosen.weight < 600;
+      const synthItalic = style === 'italic' && chosen.style !== 'italic';
+      return { key, family, weight, style, font, synthBold, synthItalic, used: new Map(), obj: 0, res: '', user: chosen };
+    } catch (e: any) {
+      this.warn(`${family}: the font file could not be read (${e?.message || e}); text set in it uses a standard font.`);
+      return null;
+    }
+  }
+  private userCache = new Map<string, Promise<TrueTypeFont>>();
 
   private async load(family: string, weight: 400 | 700, style: 'normal' | 'italic', key: string): Promise<EmbeddedFace | null> {
     let src = woffSource(family, weight, style);
@@ -167,18 +210,31 @@ export class PdfFonts {
       if (!face || !face.obj) continue;
       const f = face.font;
       const gids = [...face.used.keys()].sort((a, b) => a - b);
-      const subset = f.subset(gids);
-      const z = await deflate(subset);
-      const file = w.stream(`/Length1 ${subset.length}${z.filter}`, z.data);
       const scale = 1000 / f.unitsPerEm;
-      const name = `${subsetTag()}+${(f.psName || face.family.replace(/\s+/g, '')).replace(/[^A-Za-z0-9+_.-]/g, '')}`;
+      let fileRef: string;
+      let name: string;
+      if (f.cff) {
+        // CFF outlines: the whole CFF table as a CIDFontType0C program (CIDs select glyphs directly when the CFF is not CID-keyed).
+        const cffTable = f.table('CFF ');
+        if (!cffTable) continue;
+        const z = await deflate(cffTable.slice());
+        const file = w.stream(`/Subtype /CIDFontType0C${z.filter}`, z.data);
+        fileRef = `/FontFile3 ${file} 0 R`;
+        name = (f.psName || face.family.replace(/\s+/g, '')).replace(/[^A-Za-z0-9+_.-]/g, '');
+      } else {
+        const subset = f.subset(gids);
+        const z = await deflate(subset);
+        const file = w.stream(`/Length1 ${subset.length}${z.filter}`, z.data);
+        fileRef = `/FontFile2 ${file} 0 R`;
+        name = `${subsetTag()}+${(f.psName || face.family.replace(/\s+/g, '')).replace(/[^A-Za-z0-9+_.-]/g, '')}`;
+      }
       let flags = 32; // Nonsymbolic
       if (f.fixedPitch || MONO.test(face.family)) flags |= 1;
-      if (SERIF.test(face.family)) flags |= 2;
+      if (SERIF.test(face.family) || (face.user && /serif|roman|garamond|baskerville|georgia|times|book/i.test(face.family) && !/sans/i.test(face.family))) flags |= 2;
       if (face.style === 'italic' || f.italicAngle) flags |= 64;
       if (face.weight >= 700) flags |= 1 << 18;
       const bbox = [f.bbox.xMin, f.bbox.yMin, f.bbox.xMax, f.bbox.yMax].map((v) => Math.round(v * scale));
-      const desc = w.add(`<< /Type /FontDescriptor /FontName /${name} /Flags ${flags} /FontBBox [${bbox.join(' ')}] /ItalicAngle ${face.synthItalic ? -12 : f.italicAngle} /Ascent ${Math.round(f.ascent * scale)} /Descent ${Math.round(f.descent * scale)} /CapHeight ${Math.round(f.capHeight * scale)} /XHeight ${Math.round(f.xHeight * scale)} /StemV ${face.weight >= 700 ? 120 : 80} /FontFile2 ${file} 0 R >>`);
+      const desc = w.add(`<< /Type /FontDescriptor /FontName /${name} /Flags ${flags} /FontBBox [${bbox.join(' ')}] /ItalicAngle ${face.synthItalic ? -12 : f.italicAngle} /Ascent ${Math.round(f.ascent * scale)} /Descent ${Math.round(f.descent * scale)} /CapHeight ${Math.round(f.capHeight * scale)} /XHeight ${Math.round(f.xHeight * scale)} /StemV ${face.weight >= 700 ? 120 : 80} ${fileRef} >>`);
       // Widths: runs of consecutive glyph ids.
       const wParts: string[] = [];
       for (let i = 0; i < gids.length;) {
@@ -188,7 +244,7 @@ export class PdfFonts {
         wParts.push(`${gids[i]} [${ws.join(' ')}]`);
         i = j;
       }
-      const cid = w.add(`<< /Type /Font /Subtype /CIDFontType2 /BaseFont /${name} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ${desc} 0 R /DW ${f.width1000(f.glyphFor(0x20)) || 500} /W [${wParts.join(' ')}] /CIDToGIDMap /Identity >>`);
+      const cid = w.add(`<< /Type /Font /Subtype /${f.cff ? 'CIDFontType0' : 'CIDFontType2'} /BaseFont /${name} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ${desc} 0 R /DW ${f.width1000(f.glyphFor(0x20)) || 500} /W [${wParts.join(' ')}]${f.cff ? '' : ' /CIDToGIDMap /Identity'} >>`);
       const toUni = this.toUnicode(face);
       const tu = w.stream('', new TextEncoder().encode(toUni));
       w.set(face.obj, `<< /Type /Font /Subtype /Type0 /BaseFont /${name} /Encoding /Identity-H /DescendantFonts [${cid} 0 R] /ToUnicode ${tu} 0 R >>`);

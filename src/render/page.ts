@@ -9,7 +9,8 @@ import { colorHex, resolvePara, resolveRun } from '../model/styles';
 import { geometryPath, scalePath } from '../model/geometry';
 import { frameBoxes, frameLines, layoutOptions, storyOptions, cssFamily, syncAnchors, anchorPointOf } from './flow';
 import { layoutStory, type LaidLine, type FlowBox, cssFont } from './text';
-import { pathTextLayout } from './pathText';
+import { pathTextLayout, pathTextNotes } from './pathText';
+import { tableLayout } from './table';
 import { escHtml } from '../util/sanitize';
 
 export type Owner = Page | Master;
@@ -297,7 +298,7 @@ export function linesSvg(ctx: Ctx, lines: LaidLine[]): string {
       }
       spans.push(`<tspan x="${n(l.x + s.x)}" fill="${color}" style="${style}"${baseline}>${escHtml(s.text)}</tspan>`);
     }
-    if (spans.length) parts.push(`<text y="${n(l.y)}" xml:space="preserve" data-line="${l.para}:${l.start}">${spans.join('')}</text>`);
+    if (spans.length) parts.push(`<text y="${n(l.y)}" xml:space="preserve" data-line="${l.para}:${l.start}"${l.footnoteId ? ` data-fn="${escHtml(l.footnoteId)}"` : ''}>${spans.join('')}</text>`);
     out.push(parts.join(''));
   }
   return out.join('');
@@ -324,6 +325,14 @@ function pathTextSvg(ctx: Ctx, e: PathTextItem): string {
     glyphs.push(`<text transform="translate(${n(g.x)} ${n(g.y)}) rotate(${n(g.angle)})" text-anchor="middle" fill="${colorHex(d, st.color)}" style="${style}" data-glyph="1">${escHtml(g.ch)}</text>`);
   }
   out.push(`<g class="qp-pathtext-glyphs">${glyphs.join('')}</g>`);
+  // Footnotes referenced from the text: a note area under the item's box.
+  const notes = pathTextNotes(e, layoutOptions(pub, []));
+  if (notes.lines.length) {
+    const fo = d.footnoteOptions || DEFAULT_FOOTNOTE_OPTIONS;
+    const sp = notes.separator;
+    if (sp && sp.w > 0 && fo.separator.width > 0) out.push(`<path d="M${n(sp.x)} ${n(sp.y)} H${n(sp.x + sp.w)}" stroke="${colorHex(d, 'Black')}" stroke-width="${n(fo.separator.width)}" class="qp-fn-sep"/>`);
+    out.push(`<g class="qp-pathtext-notes">${linesSvg(ctx, notes.lines)}</g>`);
+  }
   if (ctx.opts.mode === 'edit' && !r.glyphs.length) out.push(`<text x="4" y="${n(Math.min(e.h, 14))}" font-size="9" fill="#9aa0a6" font-family="system-ui, sans-serif" class="qp-prompt">Double-click to type on the path</text>`);
   if (ctx.opts.mode === 'edit' && r.overflow) out.push(`<g class="qp-overset" transform="translate(${n(e.w - 10)} ${n(e.h - 10)})"><rect width="9" height="9" fill="#fff" stroke="#d32f2f" stroke-width="0.8"/><path d="M4.5 2 V7 M2 4.5 H7" stroke="#d32f2f" stroke-width="1.2"/></g>`);
   return out.join('');
@@ -397,31 +406,14 @@ function tableSvg(ctx: Ctx, t: TableItem): string {
   const pub = ctx.pub;
   const out: string[] = [];
   const cols = t.cols;
-  let y = 0;
   const outer = t.border ?? { fill: { type: 'solid', color: 'Black' }, width: 0.75 };
   const inner = t.innerBorder ?? { fill: { type: 'solid', color: 'Gray' }, width: 0.5 };
-  t.rows.forEach((row, ri) => {
-    let x = 0;
-    row.cells.forEach((cell, ci) => {
-      const cw = cols[ci] || 0;
-      if (cell.merged) { x += cw; return; }
-      const span = cell.colSpan || 1, rspan = cell.rowSpan || 1;
-      const w = cols.slice(ci, ci + span).reduce((a, b) => a + b, 0);
-      const h = t.rows.slice(ri, ri + rspan).reduce((a, r) => a + r.h, 0);
-      const band = t.style?.bandedRows && ri % 2 === 1 ? { type: 'solid', color: t.style.bandColor || 'Light Gray' } as Fill : undefined;
-      const header = (t.style?.firstRow && ri === 0) || row.header ? (t.style?.headerFill || { type: 'solid', color: 'Primary' } as Fill) : undefined;
-      const fill = cell.fill ?? header ?? band;
-      if (fill && fill.type !== 'none') out.push(`<rect x="${n(x)}" y="${n(y)}" width="${n(w)}" height="${n(h)}" fill="${fillPaint(ctx, fill, w, h)}"/>`);
-      const ins = cell.insets || [4, 3, 4, 3];
-      const box: FlowBox = { frame: t.id, col: 0, x: x + ins[0], y: y + ins[1], w: Math.max(1, w - ins[0] - ins[2]), h: Math.max(1, h - ins[1] - ins[3]), page: ctx.pageIndex };
-      const paras: Paragraph[] = cell.text.length ? cell.text : [{ style: 'Table Text', runs: [] }];
-      const r = layoutStory(paras, layoutOptions(pub, [box], { anchor: cell.anchor || 't', unbounded: true }));
-      out.push(`<g clip-path="inset(0)">${linesSvg(ctx, r.lines)}</g>`);
-      x += cw;
-    });
-    y += row.h;
-  });
-  const totalW = cols.reduce((a, b) => a + b, 0), totalH = t.rows.reduce((a, r) => a + r.h, 0);
+  const tl = tableLayout(pub, t, ctx.pageIndex);
+  for (const c of tl.cells) {
+    if (c.fill && c.fill.type !== 'none') out.push(`<rect x="${n(c.x)}" y="${n(c.y)}" width="${n(c.w)}" height="${n(c.h)}" fill="${fillPaint(ctx, c.fill, c.w, c.h)}"/>`);
+    out.push(`<g clip-path="inset(0)">${linesSvg(ctx, c.lines)}</g>`);
+  }
+  const totalW = tl.w, totalH = tl.rowsH;
   // Inner lines
   const inn = strokeAttrs(ctx, inner);
   if (!inn.includes('stroke="none"')) {
@@ -431,6 +423,13 @@ function tableSvg(ctx: Ctx, t: TableItem): string {
     if (d.length) out.push(`<path d="${d.join(' ')}" fill="none"${inn}/>`);
   }
   out.push(`<rect width="${n(totalW)}" height="${n(totalH)}" fill="none"${strokeAttrs(ctx, outer)}/>`);
+  // Footnotes referenced from the cells: a note area under the rows.
+  if (tl.notes.length) {
+    const fo = pub.data.footnoteOptions || DEFAULT_FOOTNOTE_OPTIONS;
+    const sp = tl.separator;
+    if (sp && sp.w > 0 && fo.separator.width > 0) out.push(`<path d="M${n(sp.x)} ${n(sp.y)} H${n(sp.x + sp.w)}" stroke="${colorHex(pub.data, 'Black')}" stroke-width="${n(fo.separator.width)}" class="qp-fn-sep"/>`);
+    out.push(`<g class="qp-table-notes">${linesSvg(ctx, tl.notes)}</g>`);
+  }
   return out.join('');
 }
 

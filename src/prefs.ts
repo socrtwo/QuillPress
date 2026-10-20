@@ -40,6 +40,8 @@ export interface Prefs {
   spellDialect: 'any' | 'document' | 'en-US' | 'en-GB' | 'en-CA' | 'en-AU';
   confirmClose: boolean;
   defaultSaveFormat: string;
+  /** Write the user's fonts a publication uses into its .qpp package (Fonts dialog). */
+  packageFonts: boolean;
   readAloudRate: number;
   highContrastUI: boolean;
   uiScale: number;
@@ -107,7 +109,7 @@ export function defaultPrefs(): Prefs {
     replacements: { ...DEFAULT_REPLACEMENTS }, autoCorrect: true, autoCapitalize: true, smartQuotes: true, autoLists: true,
     theme: 'system', ribbon: 'full', spellcheck: true,
     recent: [], macros: [], dictionary: [], ignoredWords: [],
-    language: 'en-US', spellDialect: 'any', confirmClose: true, defaultSaveFormat: 'qpp', readAloudRate: 1,
+    language: 'en-US', spellDialect: 'any', confirmClose: true, defaultSaveFormat: 'qpp', packageFonts: true, readAloudRate: 1,
     highContrastUI: false, uiScale: 1, pinnedCommands: [], firstRun: true, touchMode: false, miniToolbar: true,
     unit: 'in', defaultPageSize: { w: letter.w, h: letter.h }, defaultFacing: false, defaultMargins: [36, 36, 36, 36], defaultColumns: 1,
     snapToGuides: true, snapToGrid: false, gridSize: 12, showGrid: false, showGuides: true, showBaselineGrid: false, smartGuides: true,
