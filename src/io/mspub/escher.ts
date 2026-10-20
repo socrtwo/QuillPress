@@ -209,7 +209,7 @@ export function parseDelayStream(delay: Uint8Array): DelayPicture[] {
   while (r.pos + 8 <= r.length) {
     const rec = readRecord(r);
     const def = BLIP[rec.type];
-    if (!def) { out.push({ kind: 'unknown', mime: 'application/octet-stream', data: new Uint8Array(0) }); r.seek(rec.end); if (rec.end <= rec.start - 8) break; continue; }
+    if (!def) { out.push({ kind: 'unknown', mime: 'application/octet-stream', data: new Uint8Array(0) }); r.seek(rec.end); continue; }
     const start = rec.start + def.offset + (def.oneUid.includes(rec.inst) ? 0 : 0x10);
     let data: Uint8Array = delay.slice(Math.min(start, rec.end), rec.end);
     if (def.kind === 'dib' && data.length >= 0x2e + 4) data = dibToBmp(data);

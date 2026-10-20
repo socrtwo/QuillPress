@@ -94,7 +94,7 @@ export function readTextBlock(file: PmFile, id: number): PmText {
 
 function readRule(r: { u16: () => number; u8: () => number; u32: () => number; skip: (n: number) => void }): PmRule | undefined {
   const flags = r.u16();
-  if (!(flags & 1)) { r.skip(18); return undefined; }
+  if (!(flags & 1)) { r.skip(16); return undefined; }
   const type = r.u8();
   r.skip(1);
   const width = (r.u32() >> 8) & 0xffff;

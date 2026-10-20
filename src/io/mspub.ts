@@ -14,7 +14,12 @@ import { openCfb, isCfb } from './cfb';
 import { utf16Runs, paragraphsFrom, picturesFrom, buildPublication, type LegacyImport } from './legacyLayout';
 import type { Paragraph } from '../model/types';
 import { openPubStreams, type PubStreams } from './mspub/cfbStreams';
-import { dibToBmp } from './mspub/escher';
+import { dibToBmp, parseEscher, parseDelayStream } from './mspub/escher';
+import { parseContents } from './mspub/contents';
+import { parseQuill } from './mspub/quill';
+import { buildLayout } from './mspub/shapes';
+import { collectPub } from './mspub/collect';
+import { parse2k } from './mspub/pub2k';
 
 /** A compound file with Publisher's "Quill" text stream. */
 export function isMsPub(b: Uint8Array): boolean {
@@ -61,13 +66,8 @@ export function quillText(quill: Uint8Array): Paragraph[] {
 /** Reads the layout; throws when the file's version is unsupported or its structures are damaged. */
 async function readLayout(st: PubStreams, name: string): Promise<LegacyImport> {
   if (st.version === 'unknown') throw new Error('unsupported version');
-  const { collectPub } = await import('./mspub/collect');
   if (st.version === '2002') {
     if (!st.contents || !st.escher) throw new Error('the Contents or Escher stream is missing');
-    const { parseContents } = await import('./mspub/contents');
-    const { parseQuill } = await import('./mspub/quill');
-    const { parseEscher, parseDelayStream } = await import('./mspub/escher');
-    const { buildLayout } = await import('./mspub/shapes');
     const contents = parseContents(st.contents);
     const quill = st.quill ? parseQuill(st.quill) : null;
     const escher = parseEscher(st.escher);
@@ -78,8 +78,6 @@ async function readLayout(st: PubStreams, name: string): Promise<LegacyImport> {
     return { pub: r.pub, warnings: r.warnings, textOnly: false };
   }
   if (!st.contents) throw new Error('the Contents stream is missing');
-  const { parse2k } = await import('./mspub/pub2k');
-  const { parseQuill } = await import('./mspub/quill');
   const quill = st.version === '2000' && st.quill ? parseQuill(st.quill) : null;
   const doc = parse2k(st.contents, quill, st.version);
   if (!doc.pages.length) throw new Error('no pages');

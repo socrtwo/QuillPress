@@ -61,7 +61,7 @@ function readChunks(r: Reader): Chunk[] {
   return out;
 }
 
-function shapeOf(r: Reader, c: Chunk, chunks: Chunk[], palette: number[], L: Layout97, pictures: number[], counts: LDoc['counts'], depth: number): LShape | null {
+function shapeOf(r: Reader, c: Chunk, chunks: Chunk[], palette: number[], names: Map<number, string>, L: Layout97, pictures: number[], counts: LDoc['counts'], depth: number): LShape | null {
   if (depth > 32) return null;
   const o = c.offset;
   const s: LShape = { seq: c.seq, kind: c.marker === 0x000f ? 'group' : 'shape', type: 1 };
@@ -83,20 +83,20 @@ function shapeOf(r: Reader, c: Chunk, chunks: Chunk[], palette: number[], L: Lay
   if (flagsOffset) { const f = r.u8At(o + flagsOffset); if (f & 0x1) s.flipV = true; if (f & (0x2 | 0x10)) s.flipH = true; }
   if (s.kind === 'group') {
     s.children = chunks.filter((k) => k.parent === c.seq && k !== c && (k.marker === 0x000f || k.marker === 0x0002 || (k.marker >= 0x0004 && k.marker <= 0x0008) || k.marker === 0x0000))
-      .map((k) => shapeOf(r, k, chunks, palette, L, pictures, counts, depth + 1)).filter((k): k is LShape => !!k);
+      .map((k) => shapeOf(r, k, chunks, palette, names, L, pictures, counts, depth + 1)).filter((k): k is LShape => !!k);
     return s;
   }
   if (isImage) {
     const idx = pictures.indexOf(c.seq);
     if (idx >= 0) s.picture = idx + 1;
   } else if (r.u8At(o + L.fillType) === 2) {
-    s.fill = { type: 'solid', color: colorOf(colorRef2k(r.u32At(o + L.fillColor)), palette) } as Fill;
+    s.fill = { type: 'solid', color: colorOf(colorRef2k(r.u32At(o + L.fillColor)), palette, names) } as Fill;
   }
   // Strokes: the left line, and for rectangles the top/right/bottom lines; the first that exists is used.
   const sides: { w: number; c: number }[] = [{ w: r.u8At(o + L.firstLine), c: r.u32At(o + L.firstLine + 1) }];
   if (isRect) for (let i = 0; i < 3; i++) { const p = o + L.secondLine + i * 6; sides.unshift({ w: r.u8At(p), c: r.u32At(p + 1) }); }
   const side = sides.find((x) => x.w !== 0);
-  if (side) s.line = { color: colorOf(colorRef2k(side.c), palette), width: Math.max(0.25, lineWidth2k(side.w)) };
+  if (side) s.line = { color: colorOf(colorRef2k(side.c), palette, names), width: Math.max(0.25, lineWidth2k(side.w)) };
   s.insets = [emuPt(36576), emuPt(36576), emuPt(36576), emuPt(36576)];
   return s;
 }
@@ -120,6 +120,8 @@ export function parse2k(contents: Uint8Array, quill: QuillInfo | null, version: 
     : { textIdOffset: 0x58, textMarker: 0x0008, firstLine: 0x2c, secondLine: 0x35, fillType: 0x2a, fillColor: 0x22, coordOffset: 0 };
   const palette: number[] = [];
   for (const c of chunks) if (c.marker === 0x0047) for (let j = 0; j < 8; j++) palette.push(color2k(r.u32At(c.offset + 0xa0 + j * 4)));
+  const names = new Map<number, string>();
+  palette.forEach((_c, i) => names.set(i, `Scheme Color ${i + 1}`));
   const counts = { unknownShapes: 0, borderArt: 0, calcGeometry: 0, unplaced: 0 };
   // Image data chunks hold Windows metafiles; they are counted so the frames can say what is missing.
   const imageData = chunks.filter((c) => c.marker === 0x0021);
@@ -131,7 +133,7 @@ export function parse2k(contents: Uint8Array, quill: QuillInfo | null, version: 
     for (const c of chunks) {
       if (c.parent !== pc.seq || c === pc) continue;
       if (!(c.marker === 0x000f || c.marker === 0x0002 || (c.marker >= 0x0004 && c.marker <= 0x0008) || c.marker === 0x0000)) continue;
-      const s = shapeOf(r, c, chunks, palette, L, pictures, counts, 0);
+      const s = shapeOf(r, c, chunks, palette, names, L, pictures, counts, 0);
       if (s) pg.shapes.push(s);
     }
     pages.push(pg);

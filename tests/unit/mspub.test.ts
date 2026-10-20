@@ -160,7 +160,7 @@ function quill2002(): Uint8Array {
   const stsh2 = new Buf().u32(0).u32(2).pad(12).u32(8).u32(8 + 2 + defChar.length).u16(0).bytes(defChar).u16(0).bytes(defPara).out();
   const font = new Buf().u32(0).u32(2).pad(12 + 8).u16('Georgia'.length).utf16('Georgia').u32(0).u16('Verdana'.length).utf16('Verdana').u32(0).out();
   // Table cell ends: byte offsets of the end of each cell's text inside story 3.
-  const tcd = new Buf().u32(3).pad(4).u32(4).u32(10).u32(16).u32(24).out();
+  const tcd = new Buf().u32(3).pad(8).u32(4).u32(10).u32(16).u32(24).out();
   const chunks: QChunk[] = [
     { name: 'TEXT', id: 0, data: text }, { name: 'STRS', id: 0, data: strs }, { name: 'SYID', id: 0, data: syid }, { name: 'PL  ', id: 0, data: colors },
     { name: 'FDPC', id: 0, data: fdpc }, { name: 'FDPP', id: 0, data: fdpp }, { name: 'STSH', id: 0, data: new Uint8Array(8) }, { name: 'STSH', id: 1, data: stsh2 },
@@ -194,7 +194,7 @@ function contents2002(): Uint8Array {
     { seq: SEQ.cells, type: 0x63, parent: SEQ.table, data: chunk(blk4(1, 4), cont(2, 0x88, ...[[0, 0], [0, 1], [1, 0], [1, 1]].map(([r, c]) => cont(0, 0x88, blk4(1, r), blk4(2, r), blk4(3, c), blk4(4, c))))) },
     { seq: SEQ.master, type: 0x43, parent: 0, data: chunk(cont(0x02, 0x88, blkSeq(SEQ.bar)), str(0x0e, 'Master A')) },
     { seq: SEQ.bar, type: 0x01, parent: SEQ.master, data: shape() },
-    { seq: SEQ.palette, type: 0x5c, parent: 0, data: chunk(cont(0, 0xa0, cont(0, 0x88, blk4(1, 0x003366)), cont(0, 0x88, blk4(1, 0x0000cc)), dummy(), dummy(), dummy(), dummy(), dummy(), dummy())) },
+    { seq: SEQ.palette, type: 0x5c, parent: 0, data: chunk(cont(0, 0xa0, dummy(), cont(0, 0x88, blk4(1, 0x003366)), cont(0, 0x88, blk4(1, 0x0000cc)), dummy(), dummy(), dummy(), dummy(), dummy())) },
   ];
   // Layout: header, chunks in sequence order, trailer.
   const header = new Buf().u8(0xe8).u8(0xac).u8(0x2c).u8(0x00).pad(0x1a - 4).u32(0).pad(0x40 - 0x1e).out();
@@ -371,9 +371,9 @@ function contents2000(): Uint8Array {
   const doc = new Buf().u16(0x0015).pad(0x14 - 2).u32(inch(8.5)).u32(inch(11)).pad(16).out();
   const page = new Buf().u16(0x0014).pad(0x40).out();
   // Text box: marker 0x0008, rotation at +4 (tenths of a degree, counter-clockwise), coordinates at +6, fill type at +0x2a (2 = solid) with color at +0x22, left line at +0x2c, text id at +0x58.
-  const textBox = new Buf().u16(0x0008).u16(0).u16(0).i32(inch(-3)).i32(inch(-4)).i32(inch(3)).i32(inch(-1)).pad(0x22 - 0x16).u32(0xc0000001).pad(0x2a - 0x26).u8(2).u8(0).u8(4).u32(0x20ff0000).pad(0x58 - 0x31).u16(1).pad(8).out();
+  const textBox = new Buf().u16(0x0008).u16(0).u16(0).i32(inch(-3)).i32(inch(-4)).i32(inch(3)).i32(inch(-1)).pad(0x22 - 0x16).u32(0xc0000001).pad(0x2a - 0x26).u8(2).u8(0).u8(1).u32(0x20ff0000).pad(0x58 - 0x31).u16(1).pad(8).out();
   // Ellipse: marker 0x0007, no fill, left line 2pt green.
-  const ellipse = new Buf().u16(0x0007).u16(450).u16(0).i32(inch(-1)).i32(inch(1)).i32(inch(1)).i32(inch(3)).pad(0x2a - 0x16).u8(0).u8(0).u8(8).u32(0x80000003).pad(0x58 - 0x31).u16(0).pad(8).out();
+  const ellipse = new Buf().u16(0x0007).u16(0).u16(450).i32(inch(-1)).i32(inch(1)).i32(inch(1)).i32(inch(3)).pad(0x2a - 0x16).u8(0).u8(0).u8(2).u32(0x80000003).pad(0x58 - 0x31).u16(0).pad(8).out();
   const palette = new Buf().u16(0x0047).pad(0xa0 - 2).u32(0x90123456).u32(0x80000002).pad(24).out();
   const items = [{ seq: 1, parent: 0, data: doc }, { seq: 2, parent: 0, data: page }, { seq: 3, parent: 2, data: textBox }, { seq: 4, parent: 2, data: ellipse }, { seq: 5, parent: 0, data: palette }];
   let off = header.length;
