@@ -1,10 +1,14 @@
 /**
  * PDF export with QuillPress's own writer (no dependency). Pages are written as vector content:
- * shapes and frames as paths, text as positioned runs in the standard 14 fonts (Helvetica, Times and
- * Courier families, chosen by the font's classification), pictures as embedded JPEG (DCTDecode) or
+ * shapes and frames as paths, text as positioned runs, pictures as embedded JPEG (DCTDecode) or
  * decoded RGB (FlateDecode), with trim and bleed boxes, page labels and document information.
- * Fonts are not embedded: text set in other faces keeps its position and size but prints in the
- * standard face. For a PDF with the exact screen fonts, use Print ▸ Save as PDF.
+ *
+ * Fonts: text set in a bundled family (Tinos, Arimo, Cousine, Carlito, Caladea, Gelasio, EB Garamond,
+ * Courier Prime, Libre Baskerville, Lato, Merriweather, Open Sans) or in one of their aliases (Times
+ * New Roman, Arial, Courier New, Calibri, Cambria, Georgia, Garamond, Baskerville…) is embedded as a
+ * TrueType subset (export/fonts/), so the PDF shows the same faces as the screen and its text stays
+ * searchable. Only fonts QuillPress does not bundle print in the closest standard-14 face
+ * (Helvetica, Times, Courier), keeping their positions and sizes.
  */
 import type { Pub } from '../model/pub';
 import type { Item, Page, Fill, Line, TextFrame, Master, Paragraph } from '../model/types';
@@ -14,6 +18,7 @@ import { frameBoxes, frameLines, layoutOptions } from '../render/flow';
 import { layoutStory, type LaidLine, type FlowBox } from '../render/text';
 import { unb64 } from '../io/xml';
 import { decodePng } from '../io/png';
+import { PdfFonts, type EmbeddedFace, type FontLoader } from './fonts/embed';
 
 export interface PdfOptions {
   /** Include the bleed area (page box grows by the bleed; TrimBox marks the page). */
@@ -29,7 +34,17 @@ export interface PdfOptions {
   /** Print spreads (facing pages side by side). */
   spreads?: boolean;
   onProgress?: (done: number, total: number) => void;
+  /** Embed the bundled fonts as subsets (default true); false sets every run in the standard 14 fonts. */
+  embedFonts?: boolean;
+  /** Reads a bundled WOFF file by URL (tests pass a file reader; the app fetches). */
+  fontLoader?: FontLoader;
+  /** Called for each font that could not be embedded. */
+  onWarning?: (message: string) => void;
 }
+
+let lastWarnings: string[] = [];
+/** Warnings of the most recent pubToPdf call (fonts that fell back to a standard face). */
+export function lastPdfWarnings(): string[] { return [...lastWarnings]; }
 
 // Helvetica, Times and Courier glyph widths (1/1000 em) for ASCII 32–126.
 const HELV = [278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, 1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556, 333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584];
@@ -109,7 +124,7 @@ class Writer {
   }
 }
 
-interface Ctx { pub: Pub; w: Writer; fonts: Map<string, number>; images: Map<string, { obj: number; w: number; h: number }>; fontRes: string[]; imgRes: string[]; H: number; bleed: number; opts: PdfOptions; pageIndex: number }
+interface Ctx { pub: Pub; w: Writer; fontSet: PdfFonts; fonts: Map<string, number>; images: Map<string, { obj: number; w: number; h: number }>; fontRes: string[]; imgRes: string[]; H: number; bleed: number; opts: PdfOptions; pageIndex: number }
 
 /** SVG path → PDF path operators (y flipped by the caller's cm). */
 function pathOps(d: string): string {
@@ -219,28 +234,80 @@ function fontKey(ctx: Ctx, name: string): string {
   return `/F${[...ctx.fonts.keys()].indexOf(name) + 1}`;
 }
 
+/** Resource name of an embedded face, reserving its font object on first use. */
+function embeddedKey(ctx: Ctx, face: EmbeddedFace): string {
+  if (!face.res) {
+    face.obj = ctx.w.reserve();
+    ctx.fonts.set('embedded:' + face.key, face.obj);
+    face.res = `/F${ctx.fonts.size}`;
+    ctx.fontRes.push(`${face.res} ${face.obj} 0 R`);
+  }
+  return face.res;
+}
+
+/** Small capitals: lowercase letters become capitals at 80% of the size. */
+function smallCapsChunks(text: string, size: number): { text: string; size: number }[] {
+  const out: { text: string; size: number }[] = [];
+  for (const ch of text) {
+    const lower = ch !== ch.toUpperCase() && ch === ch.toLowerCase();
+    const sz = lower ? size * 0.8 : size;
+    const t = lower ? ch.toUpperCase() : ch;
+    const last = out[out.length - 1];
+    if (last && last.size === sz) last.text += t; else out.push({ text: t, size: sz });
+  }
+  return out;
+}
+
+/**
+ * One run of text at a page position: in the embedded face when the family is bundled (glyph ids,
+ * Identity-H), otherwise in the standard font that stdFont() picks. Characters the embedded face lacks
+ * are set in the standard font so nothing is dropped.
+ */
+async function textOps(ctx: Ctx, text: string, family: string | undefined, bold: boolean | undefined, italic: boolean | undefined, size: number, x: number, y: number, color: [number, number, number], spc: number, caps: 'all' | 'small' | 'none' | undefined): Promise<string> {
+  const [r, g, b] = color;
+  const fill = `${n(r)} ${n(g)} ${n(b)} rg`;
+  const std = stdFont(family, bold, italic);
+  const face = ctx.opts.embedFonts === false ? null : await ctx.fontSet.face(family, bold, italic);
+  const chunks = caps === 'small' ? smallCapsChunks(text, size) : [{ text: caps === 'all' ? text.toUpperCase() : text, size }];
+  const ops: string[] = [];
+  let cx = x;
+  const stdOp = (t: string, sz: number) => {
+    const f = fontKey(ctx, std);
+    ops.push(`BT ${fill} ${f} ${n(sz)} Tf${spc ? ` ${n(spc)} Tc` : ''} 1 0 0 -1 ${n(cx)} ${n(y)} Tm ${pdfText(t)} Tj ET`);
+    cx += textWidth(t, sz, std) + spc * [...t].length;
+  };
+  for (const ch of chunks) {
+    if (!face) { stdOp(ch.text, ch.size); continue; }
+    const res = embeddedKey(ctx, face);
+    for (const piece of ctx.fontSet.encode(face, ch.text, ch.size, spc)) {
+      if ('hex' in piece) {
+        const synth = face.synthBold ? ` 2 Tr ${n(piece.size / 30)} w ${n(r)} ${n(g)} ${n(b)} RG` : '';
+        ops.push(`BT ${fill} ${res} ${n(piece.size)} Tf${spc ? ` ${n(spc)} Tc` : ''}${synth} 1 0 ${face.synthItalic ? '0.2' : '0'} -1 ${n(cx)} ${n(y)} Tm <${piece.hex}> Tj ET${synth ? ' 0 Tr' : ''}`);
+        cx += piece.width;
+      } else {
+        stdOp(piece.fallback, piece.size);
+      }
+    }
+  }
+  return ops.join('\n');
+}
+
 /** Text of laid-out lines as PDF operators (page coordinates, y up handled by the caller's cm). */
-function linesOps(ctx: Ctx, lines: LaidLine[]): string {
+async function linesOps(ctx: Ctx, lines: LaidLine[]): Promise<string> {
   const d = ctx.pub.data;
   const out: string[] = [];
   for (const l of lines) {
-    if (l.bullet) {
-      const f = fontKey(ctx, stdFont(l.bullet.font));
-      const [r, g, b] = rgb(colorHex(d, l.bullet.color));
-      out.push(`BT ${n(r)} ${n(g)} ${n(b)} rg ${f} ${n(l.bullet.size)} Tf 1 0 0 -1 ${n(l.bullet.x)} ${n(l.y)} Tm ${pdfText(l.bullet.text)} Tj ET`);
-    }
+    if (l.bullet) out.push(await textOps(ctx, l.bullet.text, l.bullet.font, false, false, l.bullet.size, l.bullet.x, l.y, rgb(colorHex(d, l.bullet.color)), 0, undefined));
     for (const s of l.segs) {
-      if (!s.text.trim()) continue;
+      if (!s.text) continue;
       const st = s.style;
-      const f = fontKey(ctx, stdFont(s.font, st.b, st.i));
-      const [r, g, b] = rgb(colorHex(d, st.color));
+      const color = rgb(colorHex(d, st.color));
       let y = l.y;
       if (s.drop) y = l.y + (s.drop - 1) * l.height;
       if (st.baseline) y -= (st.baseline / 100) * s.size * 0.6;
-      const text = st.caps === 'all' ? s.text.toUpperCase() : s.text;
-      const spc = st.spc ? ` ${n(st.spc)} Tc` : '';
-      out.push(`BT ${n(r)} ${n(g)} ${n(b)} rg ${f} ${n(s.size)} Tf${spc} 1 0 0 -1 ${n(l.x + s.x)} ${n(y)} Tm ${pdfText(text)} Tj ET`);
+      out.push(await textOps(ctx, s.text, s.font, st.b, st.i, s.size, l.x + s.x, y, color, st.spc || 0, st.caps));
       if (st.u || st.strike) {
+        const [r, g, b] = color;
         const yy = st.u ? y + s.size * 0.12 : y - s.size * 0.3;
         out.push(`${n(r)} ${n(g)} ${n(b)} RG ${n(Math.max(0.5, s.size / 16))} w ${n(l.x + s.x)} ${n(yy)} m ${n(l.x + s.x + s.w)} ${n(yy)} l S`);
       }
@@ -376,7 +443,7 @@ async function itemOps(ctx: Ctx, e: Item, owner: Page | Master, fromMaster: bool
       if (fromMaster) { const story = pub.story(e.story); const boxes: FlowBox[] = frameBoxes(e, owner, ctx.pageIndex, pub); lines = story ? layoutStory(story.paras, layoutOptions(pub, boxes, { anchor: (e.columns || 1) === 1 ? e.anchor : undefined })).lines : []; }
       else lines = frameLines(pub, e).lines;
       out.push(`q ${local(d)} W n 1 0 0 1 ${n(-e.x)} ${n(-e.y)} cm`);
-      out.push(linesOps(ctx, lines));
+      out.push(await linesOps(ctx, lines));
       out.push('Q');
       break;
     }
@@ -411,11 +478,13 @@ async function itemOps(ctx: Ctx, e: Item, owner: Page | Master, fromMaster: bool
       const cols = e.cols;
       const totalW = cols.reduce((a, b) => a + b, 0), totalH = e.rows.reduce((a, r) => a + r.h, 0);
       out.push(`q 1 0 0 1 ${n(e.x)} ${n(e.y)} cm`);
-      e.rows.forEach((row, ri) => {
+      for (let ri = 0; ri < e.rows.length; ri++) {
+        const row = e.rows[ri];
         let x = 0;
-        row.cells.forEach((cell, ci) => {
+        for (let ci = 0; ci < row.cells.length; ci++) {
+          const cell = row.cells[ci];
           const cw = cols[ci] || 0;
-          if (cell.merged) { x += cw; return; }
+          if (cell.merged) { x += cw; continue; }
           const span = cell.colSpan || 1, rspan = cell.rowSpan || 1;
           const w = cols.slice(ci, ci + span).reduce((a, b) => a + b, 0), h = e.rows.slice(ri, ri + rspan).reduce((a, r) => a + r.h, 0);
           const band = e.style?.bandedRows && ri % 2 === 1 ? ({ type: 'solid', color: e.style.bandColor || 'Light Gray' } as Fill) : undefined;
@@ -426,11 +495,11 @@ async function itemOps(ctx: Ctx, e: Item, owner: Page | Master, fromMaster: bool
           const box: FlowBox = { frame: e.id, col: 0, x: x + ins[0], y: y + ins[1], w: Math.max(1, w - ins[0] - ins[2]), h: Math.max(1, h - ins[1] - ins[3]), page: ctx.pageIndex };
           const paras: Paragraph[] = cell.text.length ? cell.text : [{ style: 'Table Text', runs: [] }];
           const r = layoutStory(paras, layoutOptions(pub, [box], { anchor: cell.anchor || 't', unbounded: true }));
-          out.push(`q ${n(x)} ${n(y)} ${n(w)} ${n(h)} re W n`, linesOps(ctx, r.lines), 'Q');
+          out.push(`q ${n(x)} ${n(y)} ${n(w)} ${n(h)} re W n`, await linesOps(ctx, r.lines), 'Q');
           x += cw;
-        });
+        }
         y += row.h;
-      });
+      }
       const inner = strokeOp(ctx, e.innerBorder ?? { fill: { type: 'solid', color: 'Gray' }, width: 0.5 });
       if (inner) {
         let xx = 0; for (let c = 1; c < cols.length; c++) { xx += cols[c - 1]; out.push(`q ${inner} ${n(xx)} 0 m ${n(xx)} ${n(totalH)} l S Q`); }
@@ -450,6 +519,7 @@ export async function pubToPdf(pub: Pub, opts: PdfOptions = {}): Promise<Uint8Ar
   const w = new Writer();
   const fonts = new Map<string, number>(), images = new Map<string, { obj: number; w: number; h: number }>();
   const fontRes: string[] = [], imgRes: string[] = [];
+  const fontSet = new PdfFonts(opts.fontLoader, opts.onWarning);
   const bleed = opts.bleed ? pub.data.bleed : 0;
   const marksPad = opts.marks ? Math.max(bleed, 18) + 18 : 0;
   const pad = Math.max(bleed, marksPad);
@@ -461,7 +531,7 @@ export async function pubToPdf(pub: Pub, opts: PdfOptions = {}): Promise<Uint8Ar
   for (let pi = 0; pi < pages.length; pi++) {
     const page = pages[pi];
     const pageIndex = pub.pageIndex(page.id);
-    const ctx: Ctx = { pub, w, fonts, images, fontRes, imgRes, H, bleed, opts, pageIndex };
+    const ctx: Ctx = { pub, w, fontSet, fonts, images, fontRes, imgRes, H, bleed, opts, pageIndex };
     const ops: string[] = [];
     // Flip to y-down page coordinates: origin at the top-left of the trim box.
     ops.push(`1 0 0 -1 ${n(pad)} ${n(H - pad)} cm`);
@@ -487,6 +557,8 @@ export async function pubToPdf(pub: Pub, opts: PdfOptions = {}): Promise<Uint8Ar
     (page as any).__pdfContent = content;
     opts.onProgress?.(pi + 1, pages.length);
   }
+  await fontSet.finish(w, deflate);
+  lastWarnings = [...fontSet.warnings];
   const gsRes = [...gsObjs].map((a) => `/GSa${a} ${w.add(`<< /Type /ExtGState /ca ${n(a / 100)} /CA ${n(a / 100)} >>`)} 0 R`);
   const resources = `<< /Font << ${fontRes.join(' ')} >> /XObject << ${imgRes.join(' ')} >> /ExtGState << ${gsRes.join(' ')} >> /ProcSet [/PDF /Text /ImageB /ImageC] >>`;
   const resObj = w.add(resources);
