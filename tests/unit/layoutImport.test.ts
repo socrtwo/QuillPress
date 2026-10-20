@@ -451,12 +451,12 @@ describe('import commands and formats table', () => {
       expect(c!.tab).toBe('Backstage');
     }
   });
-  it('lists the new formats as import-only', () => {
+  it('lists the new formats (IDML both ways, the rest import-only)', () => {
     for (const id of ['idml', 'indd', 'pub', 'qxp', 'pmd', 'mif', 'xtg']) {
       const f = FORMATS.find((x) => x.id === id);
       expect(f, id).toBeTruthy();
       expect(f!.canImport).toBe(true);
-      expect(f!.canExport).toBe(false);
+      expect(f!.canExport).toBe(id === 'idml');
     }
     expect(formatFromName('x.p65')?.id).toBe('pmd');
     expect(formatFromName('x.qxt')?.id).toBe('qxp');

@@ -24,6 +24,7 @@ src/
     flow.ts               frames → column boxes, wrap exclusions, story layout through a chain, overset
     page.ts               the one page renderer: SVG for the editor, thumbnails, print and export
     pathText.ts           glyph placement along a path (pathTextGlyphs: shared by the SVG renderer and the PDF writer)
+    table.ts              tableLayout: cells, note area and total height, shared by the renderer and the PDF writer
   edit/
     workspace.ts          the tab view: pages rail, rulers, single page or spread canvases, preview mode
     canvas.ts             selection, move/resize/rotate, snapping and smart guides, drawing tools, link ports,
@@ -38,8 +39,11 @@ src/
     qpp.ts                .qpp (ZIP), .json, .qppe (AES-256-GCM)
     sla.ts                Scribus import and export
     idml.ts, idmlText.ts  InDesign IDML import (designmap, spreads, master spreads, stories, styles, colors)
-    mspub.ts, cfb.ts      Microsoft Publisher: compound-file reader, Quill text, Office Art pictures
-    legacyLayout.ts       QuarkXPress, PageMaker and INDD: text runs and pictures recovered from the bytes
+    idmlExport.ts, idmlExportText.ts   IDML export (the inverse: package, spreads, items, styles, stories, footnotes, tables)
+    mspub.ts, mspub/      Microsoft Publisher: compound-file streams, Contents chunks, Quill text, Office Art shapes
+                          and pictures, layout assembly (2002–2016, 2000, 97/98); cfb.ts the compound-file reader
+    qxp/, pagemaker/      QuarkXPress 3.1–4.1 and PageMaker 6–7 layout readers (blocks/records, objects, text)
+    legacyLayout.ts       dispatch and the fallback: text runs and pictures recovered from the bytes (INDD, other versions)
     xpressTags.ts, mif.ts XPress Tags and FrameMaker MIF readers
     textImport.ts         text, Markdown, RTF, Word and HTML → paragraphs
     images.ts, tiff.ts, png.ts   pictures: type, size, TIFF → BMP, PNG decoding without a canvas
@@ -47,14 +51,14 @@ src/
     recover/              fileid (identification), inflate (ImmortalInflate), salvage (ZIP), index (methods)
   export/
     pdf.ts                the vector PDF writer (embedded font subsets, pictures, boxes, labels, marks, path text)
-    fonts/                WOFF → TrueType, TrueType parsing and subsetting, CID font embedding with ToUnicode
+    fonts/                WOFF → TrueType, TrueType/OpenType parsing and subsetting, user font files, CID font embedding
     images.ts             SVG with embedded fonts; PNG/JPEG rasterization
     html.ts               web page export; text and Markdown of the stories
     print.ts              print sheets, preview dialog, crop marks, spreads
   proof/                  spelling: dictionaries (downloads), proofing (targets, worker protocol), worker
   ai/                     providers, client, store, ensemble (shared); press.ts (QuillPress prompts)
   ui/                     shell (ribbon, QAT, tabs, status bar, context menus), dialogs, panes, backstage,
-                          customize dialogs, AI and dictionary wizards, recovery report
+                          customize dialogs, AI and dictionary wizards, recovery report, fonts dialog
   platform/native.ts      files, sharing, printing, clipboard, sibling apps (browser, Capacitor, Electron)
   util/                   keys, store (IndexedDB), crypto, sanitize
   styles/                 app.css (shell, shared) and press.css (workspace, overlay, editor)

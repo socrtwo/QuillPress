@@ -73,6 +73,8 @@ export function sniffFormat(data: Uint8Array, name: string): string | null {
   if (data[0] === 0x06 && data[1] === 0x06 && data[2] === 0xed && data[3] === 0xf5) return 'indd';
   if (data[0] === 0xd0 && data[1] === 0xcf && data[2] === 0x11 && data[3] === 0xe0) return byName === 'pub' || contains(data, 'Q\x00u\x00i\x00l\x00l\x00') ? 'pub' : byName;
   if (/^.{2}(MM|II)XPR[0-9]/s.test(head)) return 'qxp';
+  // A Mac QuarkXPress file wrapped in MacBinary: the header starts after the 128-byte MacBinary block.
+  if (data.length > 140 && /^(MM|II)XPR[0-9]/.test(ascii(data, 130, 136))) return 'qxp';
   if (((data[0] === 0 && data[1] === 0 && data[2] === 0xff && data[3] === 0xff) || (data[0] === 0xff && data[1] === 0xff && data[2] === 0 && data[3] === 0)) && (contains(data, 'PageMaker', 8192) || byName === 'pmd')) return 'pmd';
   const text = new TextDecoder().decode(data.subarray(0, 4096)).replace(/^﻿/, '');
   if (/^\s*<MIFFile/.test(text)) return 'mif';

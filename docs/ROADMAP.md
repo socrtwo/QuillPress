@@ -37,12 +37,14 @@
 - [x] Templates (newsletter, brochure, flyer, poster, business card, invoice, menu, résumé, booklet, postcard, report); color and font schemes; layout guides; step and repeat; paste in place; master item overrides.
 - [x] Anchored objects (inline, above the line, custom offset) that move with the text; footnotes at the bottom of the column with numbering schemes, separators, endnote conversion and a pane; text on a path (line, arcs, circle, wave, zigzag, any shape) in the editor, SVG and PDF.
 - [x] PDF export embeds the publication's fonts as subsets (standard 14 only for fonts the app does not bundle).
-- [ ] Optical margin alignment; OpenType features; user fonts from files; clipping paths for tight wrap; footnotes inside tables and path text; in-place editing of footnote text.
+- [x] Optical margin alignment (per paragraph, per story, reference size); footnotes inside tables and text on a path; in-place editing of footnote text; user fonts from files (.ttf, .otf, .ttc, .woff, .woff2) with packaging in .qpp and PDF embedding.
+- [ ] OpenType feature switches beyond ligatures and small caps; clipping paths for tight wrap; linked PageMaker threads; the editing island showing hung punctuation.
 
 ## M5 — Interchange
 
-- [x] IDML import (spreads, masters, linked frames, stories, styles, swatches, links); FrameMaker MIF and XPress Tags import; Publisher, QuarkXPress, PageMaker and INDD files open with their text and pictures (their layouts are not public formats).
-- [ ] IDML export; PDF placement; EPUB and PDF/X export; data merge.
+- [x] IDML import and export (spreads, masters, linked frames, stories, styles, swatches, links, footnotes); FrameMaker MIF and XPress Tags import.
+- [x] Publisher (2002–2016 fully; 2000 and 97/98 in part), QuarkXPress 3.1–4.1 and PageMaker 6–7 layout readers written from the Document Liberation Project's format descriptions; other versions and INDD files open with their text and pictures.
+- [ ] Verification of the binary readers against files saved by Publisher, QuarkXPress and PageMaker (none were available); PDF placement; EPUB and PDF/X export; data merge.
 
 ## M6 — Collaboration and suite
 

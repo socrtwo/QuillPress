@@ -45,6 +45,10 @@ Product names appear in the documentation and in file-type lists only to identif
 
 QuillPress is not affiliated with, endorsed by, or sponsored by any of them.
 
+## Format references
+
+The readers for Microsoft Publisher (.pub), QuarkXPress (.qxp, .qxd, .qxt) and PageMaker (.pmd, .p65, .pm6, .pmt) were written from the public descriptions of those formats embodied in the Document Liberation Project's libmspub, libqxp and libpagemaker, together with the Microsoft Open Specifications for the compound file container ([MS-CFB]) and the Office Art drawing records ([MS-ODRAW]). Those libraries are licensed under the Mozilla Public License 2.0, which this suite does not accept for shipped code, so they served only as a description of the record layouts, constants and parsing order; QuillPress's readers are original TypeScript and ship no code from them. InDesign binary (.indd) files have no such description, so they open with their text and pictures only; the IDML package format is Adobe's documented interchange format and is both read and written.
+
 ## Third-party components
 
 | Component | License | Use |

@@ -1,10 +1,10 @@
 # QuillPress Command Reference
 
-QuillPress ships **533 commands**. Every one can be placed on the Quick Access Bar, added to a custom tab, bound to a keyboard shortcut, recorded in a macro, or found with command search (Alt+Q).
+QuillPress ships **544 commands**. Every one can be placed on the Quick Access Bar, added to a custom tab, bound to a keyboard shortcut, recorded in a macro, or found with command search (Alt+Q).
 
-169 of them are "Commands Not in the Tabs" — reachable through the Quick Access Bar chooser, Customize Tabs, the command search, or menus — so nothing the app can do is hidden.
+176 of them are "Commands Not in the Tabs" — reachable through the Quick Access Bar chooser, Customize Tabs, the command search, or menus — so nothing the app can do is hidden.
 
-Of the 556 command ids named in [COMMANDS-PLAN.md](COMMANDS-PLAN.md), 533 are implemented and 23 are not yet; they are listed at the end of this file.
+Of the 567 command ids named in [COMMANDS-PLAN.md](COMMANDS-PLAN.md), 544 are implemented and 23 are not yet; they are listed at the end of this file.
 
 This file is generated from the source by `npm run catalog`; a unit test fails when it is out of date.
 
@@ -30,7 +30,7 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 - **Table Design** (contextual): Table Style Options · Table Styles
 - **Table Layout** (contextual): Rows & Columns · Merge · Cell Size · Data · Alignment
 
-## File (56)
+## File (57)
 
 | Command | Group | Shortcut | ID | Notes |
 |---|---|---|---|---|
@@ -38,6 +38,7 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 | Close All | Close |  | `file.closeAll` | not in tabs |
 | Exit | Close |  | `file.exit` | not in tabs |
 | Export as Encrypted QuillPress Publication | Export |  | `file.export.qppe` | not in tabs |
+| Export as InDesign Markup (IDML) | Export |  | `file.export.idml` | not in tabs |
 | Export as QuillPress JSON | Export |  | `file.export.json` | not in tabs |
 | Export as QuillPress Publication | Export |  | `file.export.qpp` | not in tabs |
 | Export as Scribus Document | Export |  | `file.export.sla` | not in tabs |
@@ -272,7 +273,7 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 | Page Background | Schemes |  | `page.background` |  |
 | Swatches | Schemes | F5 | `page.swatchesPane` |  |
 
-## Text (51)
+## Text (61)
 
 | Command | Group | Shortcut | ID | Notes |
 |---|---|---|---|---|
@@ -285,7 +286,7 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 | Vertical Alignment | Frame Options |  | `text.verticalAlign` | has options menu |
 | Vertical Text | Frame Options |  | `text.vertical` | not in tabs |
 | Delete Footnote | Notes |  | `text.deleteFootnote` |  |
-| Edit Footnote… | Notes |  | `text.editFootnote` |  |
+| Edit Footnote | Notes |  | `text.editFootnote` |  |
 | Endnotes to Footnotes | Notes |  | `text.endnotesToFootnotes` |  |
 | Footnote Options… | Notes |  | `text.footnoteOptions` | not in tabs |
 | Footnotes | Notes |  | `text.footnotesPane` |  |
@@ -317,12 +318,22 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 | Story Editor | Tools | Ctrl+y | `text.storyEditor` | inspired by Story Editor (PageMaker), Story Editor (Scribus) |
 | Text to New Frame | Tools |  | `text.newStoryFromSelection` | not in tabs |
 | Word Count | Tools |  | `text.wordCount` |  |
+| Add Font Files… | Typography |  | `fonts.add` | not in tabs |
 | Align to Baseline Grid | Typography |  | `fmt.baselineGridAlign` |  |
 | All Caps | Typography | Ctrl+Shift+a | `fmt.allCaps` |  |
 | Baseline Shift | Typography |  | `fmt.baselineShift` |  |
+| Fonts Used Report | Typography |  | `fonts.usedReport` | not in tabs |
+| Fonts… | Typography |  | `fonts.manage` |  |
+| Forget Packaged Fonts | Typography |  | `fonts.unpackage` | not in tabs |
 | Hyphenate | Typography |  | `fmt.hyphenation` | inspired by TeX hyphenation |
+| Install Packaged Fonts | Typography |  | `fonts.installPackaged` | not in tabs |
 | Kerning | Typography |  | `fmt.kerning` |  |
 | Ligatures | Typography |  | `fmt.ligatures` |  |
+| Optical Margin Alignment | Typography |  | `fmt.opticalMargin` | inspired by Hanging punctuation (Gutenberg; InDesign optical margin alignment) |
+| Optical Margin Size… | Typography |  | `text.opticalMarginSize` |  |
+| Optical Margins for Story | Typography |  | `text.opticalMarginStory` |  |
+| Package Fonts | Typography |  | `fonts.package` | not in tabs |
+| Remove Font… | Typography |  | `fonts.remove` | not in tabs |
 | Small Caps | Typography | Ctrl+Shift+k | `fmt.smallCaps` |  |
 | Tabs… | Typography |  | `fmt.tabs` |  |
 | Text Language | Typography |  | `fmt.language` | not in tabs |

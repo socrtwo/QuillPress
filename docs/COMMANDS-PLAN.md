@@ -60,6 +60,7 @@ File: new, open, recover, save, export, print, share, info, options.
 - `file.export.json` — Export as QuillPress JSON
 - `file.export.qpp` — Export as QuillPress Publication
 - `file.export.sla` — Export as Scribus Document
+- `file.export.idml` — Export as InDesign Markup (IDML): A package InDesign opens: spreads, master spreads, frames and chains, stories with styles, swatches, layers, sections, pictures embedded
 - `file.export.svg` — Export Current Page as SVG
 - `file.export.images` — Export Pages as Pictures
 - `file.export.text` — Export Text: All stories as plain text or Markdown (headings and lists from the paragraph styles)
@@ -349,6 +350,13 @@ Text frames and flow, frame options, typography, paragraph flow and text tools.
 - `fmt.kerning` — Kerning: Pair kerning from the font (on by default)
 - `fmt.ligatures` — Ligatures: Standard ligatures (fi, fl) from the font
 - `fmt.opticalMargin` — Optical Margin Alignment: Hang punctuation and the open sides of letters outside the margins so the edges of the paragraph look straight *(inspired by Hanging punctuation (Gutenberg; InDesign optical margin alignment))*
+- `fonts.manage` — Fonts…: Add your own font files (.ttf, .otf, .ttc, .woff, .woff2), see which fonts the publication uses and which are missing, and choose whether fonts travel with the publication
+- `fonts.add` — Add Fonts…: Load font files from this device for every publication
+- `fonts.remove` — Remove Font: Forget a font you added
+- `fonts.package` — Package Fonts with Publication: Store the user fonts a publication uses inside its .qpp file (embeddable fonts only)
+- `fonts.unpackage` — Forget Packaged Fonts: Drop the fonts that came with the open publication at the end of the session
+- `fonts.installPackaged` — Install Packaged Fonts: Keep the fonts that came with a publication on this device
+- `fonts.usedReport` — Fonts Used: List the fonts the publication uses and flag the missing ones
 - `text.opticalMarginSize` — Optical Margin Size: The type size the overhang is tuned for (text of that size hangs by the full amount, larger text by less, smaller by more)
 - `text.opticalMarginStory` — Optical Margins for Story: Optical margin alignment for every paragraph of the selected story (a paragraph's own setting still wins)
 - `fmt.smallCaps` — Small Caps (Ctrl+Shift+k)
