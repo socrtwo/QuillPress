@@ -17,11 +17,13 @@ src/
     pub.ts                Pub with transactions and before-image undo/redo (page-scoped), media, lookups, JSON
     styles.ts             default styles and swatches, color and font schemes, style resolution, color names
     geometry.ts           preset shapes (original drawings) and custom paths
+    pathGeom.ts           SVG path parsing, arcs to curves, flattening, arc-length walking (text on a path, PDF)
   render/
     text.ts               the text layout engine: measure, lines, justification, hyphenation, drop caps,
                           bullets and numbering, tabs, baseline grid, fields
     flow.ts               frames → column boxes, wrap exclusions, story layout through a chain, overset
     page.ts               the one page renderer: SVG for the editor, thumbnails, print and export
+    pathText.ts           glyph placement along a path (pathTextGlyphs: shared by the SVG renderer and the PDF writer)
   edit/
     workspace.ts          the tab view: pages rail, rulers, single page or spread canvases, preview mode
     canvas.ts             selection, move/resize/rotate, snapping and smart guides, drawing tools, link ports,
@@ -29,18 +31,23 @@ src/
     textEdit.ts           in-place editing (a contenteditable island bound to the story)
     ops.ts                transactions on the current page or master, inserting, formatting, linking, arranging
     flowOps.ts            autoflow: new linked frames and pages until a story fits
-  commands/               every command, by area (file, edit, view, fmt, insert, page, text, arrange, shape,
-                          picture, table, review, tools, ai, dev, help); index.ts loads them all
+  commands/               every command, by area (file, edit, view, fmt, insert, page, text, notes, anchor, pathText,
+                          arrange, shape, picture, table, review, tools, importLayout, ai, dev, help); index.ts loads them all
   io/
     index.ts              FORMATS, sniffFormat, importPublication / exportPublication (lazy readers, recovery)
     qpp.ts                .qpp (ZIP), .json, .qppe (AES-256-GCM)
     sla.ts                Scribus import and export
+    idml.ts, idmlText.ts  InDesign IDML import (designmap, spreads, master spreads, stories, styles, colors)
+    mspub.ts, cfb.ts      Microsoft Publisher: compound-file reader, Quill text, Office Art pictures
+    legacyLayout.ts       QuarkXPress, PageMaker and INDD: text runs and pictures recovered from the bytes
+    xpressTags.ts, mif.ts XPress Tags and FrameMaker MIF readers
     textImport.ts         text, Markdown, RTF, Word and HTML → paragraphs
     images.ts, tiff.ts, png.ts   pictures: type, size, TIFF → BMP, PNG decoding without a canvas
     xml.ts                XML helpers, base64
     recover/              fileid (identification), inflate (ImmortalInflate), salvage (ZIP), index (methods)
   export/
-    pdf.ts                the vector PDF writer (standard 14 fonts, pictures, boxes, labels, marks)
+    pdf.ts                the vector PDF writer (embedded font subsets, pictures, boxes, labels, marks, path text)
+    fonts/                WOFF → TrueType, TrueType parsing and subsetting, CID font embedding with ToUnicode
     images.ts             SVG with embedded fonts; PNG/JPEG rasterization
     html.ts               web page export; text and Markdown of the stories
     print.ts              print sheets, preview dialog, crop marks, spreads

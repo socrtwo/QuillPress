@@ -23,7 +23,7 @@ This file describes what is implemented now. The longer list of page layout form
 | Rich Text, Word, HTML | .rtf .docx .html | Place or open | No | `src/io/textImport.ts` |
 | Pictures | .png .jpg .gif .webp .bmp .tif .tiff | Place into a frame, or open as a page | PNG, JPEG, SVG per page | `src/io/images.ts`, `src/io/tiff.ts`, `src/export/images.ts` |
 | SVG | .svg | Place as a picture, or open as a page of the drawing's size | Yes, per page with the fonts embedded | `src/io/images.ts`, `src/export/images.ts` |
-| PDF | .pdf | No | Yes | `src/export/pdf.ts` |
+| PDF | .pdf | No | Yes (fonts embedded) | `src/export/pdf.ts`, `src/export/fonts/` |
 | Web page | .html | — | Yes | `src/export/html.ts` |
 | Package | .zip | — | Yes | `file.package` in `src/commands/file.ts` |
 
@@ -92,12 +92,13 @@ Pictures: the type is sniffed from the bytes (`mimeOf`), the pixel size read fro
 `src/export/pdf.ts` is QuillPress's own writer (no PDF library):
 
 - one PDF page per publication page (or per spread), with `/MediaBox` grown by the bleed and `/TrimBox`/`/BleedBox` set, crop marks optional, and `/PageLabels` from the sections;
-- text set from the same line layout as the screen (`src/render/text.ts`), using the **standard 14 fonts** (Helvetica, Times, Courier families) chosen by the publication font's classification, WinAnsi encoding; characters outside WinAnsi become `?`;
+- text set from the same line layout as the screen (`src/render/text.ts`) in the publication's **own fonts, embedded as subsets**: every bundled family (Tinos, Arimo, Cousine, Carlito, Caladea, Gelasio, EB Garamond, Libre Baskerville, Lato, Merriweather, Open Sans, Courier Prime) and the names they stand in for (Times New Roman, Arial, Courier New, Calibri, Cambria, Georgia, Garamond, Baskerville, Aptos) are converted from WOFF to TrueType (`src/export/fonts/`), subset to the glyphs used and written as CIDFontType2 fonts with Identity-H encoding and a ToUnicode map, so any Unicode character the face has prints and copies out as text; fonts QuillPress does not bundle (Segoe UI, Verdana, Impact…) fall back to the closest standard 14 font (WinAnsi);
+- footnotes and their separator rules, anchored objects where the text put them, and text on a path glyph by glyph;
 - shapes and lines as paths (the preset geometry's SVG path is translated to PDF operators), fills, strokes, dashes and opacity (`ExtGState`);
 - pictures: JPEG embedded as is (`DCTDecode`, gray/RGB/CMYK), other formats decoded to RGB and compressed (`FlateDecode`) with an `SMask` for transparency; without a canvas (tests, Node) PNG is decoded by `src/io/png.ts`;
 - document information from File ▸ Properties.
 
-For the exact screen fonts, print to PDF from the system dialog (File ▸ Print): the print path uses the SVG renderer with the web fonts.
+Printing to PDF from the system dialog (File ▸ Print) goes through the SVG renderer instead and gives the same fonts; the export is the smaller, vector file for the printer.
 
 ## Other exports
 

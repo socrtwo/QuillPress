@@ -1,10 +1,10 @@
 # QuillPress Command Reference
 
-QuillPress ships **502 commands**. Every one can be placed on the Quick Access Bar, added to a custom tab, bound to a keyboard shortcut, recorded in a macro, or found with command search (Alt+Q).
+QuillPress ships **533 commands**. Every one can be placed on the Quick Access Bar, added to a custom tab, bound to a keyboard shortcut, recorded in a macro, or found with command search (Alt+Q).
 
-163 of them are "Commands Not in the Tabs" — reachable through the Quick Access Bar chooser, Customize Tabs, the command search, or menus — so nothing the app can do is hidden.
+169 of them are "Commands Not in the Tabs" — reachable through the Quick Access Bar chooser, Customize Tabs, the command search, or menus — so nothing the app can do is hidden.
 
-Of the 534 command ids named in [COMMANDS-PLAN.md](COMMANDS-PLAN.md), 502 are implemented and 32 are not yet; they are listed at the end of this file.
+Of the 556 command ids named in [COMMANDS-PLAN.md](COMMANDS-PLAN.md), 533 are implemented and 23 are not yet; they are listed at the end of this file.
 
 This file is generated from the source by `npm run catalog`; a unit test fails when it is out of date.
 
@@ -13,8 +13,8 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 - **Home**: Clipboard · Styles · Font · Paragraph · Objects · Editing
 - **Insert**: Pages · Text · Pictures · Illustrations · Tables · Fields · Symbols · Links
 - **Page Design**: Page Setup · Master Pages · Guides and Grids · Numbering · Schemes · Pages
-- **Text**: Text Frames · Frame Options · Typography · Paragraph Flow · Tools
-- **Arrange**: Order · Align · Group · Rotate · Text Wrap · Size and Position
+- **Text**: Text Frames · Frame Options · Typography · Paragraph Flow · Notes · Tools
+- **Arrange**: Order · Align · Group · Rotate · Text Wrap · Anchor · Size and Position
 - **Review**: Proofing · Preflight · Accessibility · Comments · Language · Protect
 - **View**: Views · Show · Zoom · Color · Panes · Window · Macros
 - **Tools**: Fonts · Pictures · Clean Up · Text · Package
@@ -22,14 +22,15 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 - **Developer**: Code · Data
 - **Help**: Help
 - **Master Page** (contextual): Edit Master · Master Items · Apply · Close
-- **Text Frame** (contextual): Frame · Flow · Frame Style · Text Wrap · Arrange · Size
+- **Text Frame** (contextual): Frame · Flow · Notes · Frame Style · Text Wrap · Arrange · Size
 - **Picture** (contextual): Adjust · Fitting · Picture · Frame Style · Accessibility · Text Wrap · Arrange · Size
 - **Shape** (contextual): Insert Shapes · Shape Styles · Text · Text Wrap · Arrange · Size
 - **Line** (contextual): Line · Arrange
+- **Text Path** (contextual): Path Text · Path · Font · Arrange · Size
 - **Table Design** (contextual): Table Style Options · Table Styles
 - **Table Layout** (contextual): Rows & Columns · Merge · Cell Size · Data · Alignment
 
-## File (52)
+## File (56)
 
 | Command | Group | Shortcut | ID | Notes |
 |---|---|---|---|---|
@@ -59,6 +60,10 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 | New from Template… | New |  | `file.newFromTemplate` | not in tabs |
 | New Publication with Page Size… | New |  | `file.newWithSize` | not in tabs |
 | Clear Unpinned Recent Publications | Open |  | `file.clearRecent` | not in tabs |
+| Import FrameMaker MIF… | Open |  | `file.import.mif` | not in tabs; inspired by Maker Interchange Format (FrameMaker) |
+| Import InDesign (IDML)… | Open |  | `file.import.idml` | not in tabs; inspired by IDML interchange (InDesign) |
+| Import Publisher, QuarkXPress or PageMaker File… | Open |  | `file.import.layoutFile` | not in tabs |
+| Import XPress Tags… | Open |  | `file.import.xpressTags` | not in tabs; inspired by XPress Tags (QuarkXPress) |
 | Manual Recovery Options | Open |  | `file.recoveryHelp` | not in tabs |
 | Open | Open | Ctrl+o, Ctrl+F12 | `file.open` | not in tabs |
 | Open and Repair… | Open |  | `file.openRepair` | not in tabs |
@@ -167,7 +172,7 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 | Repeat | Undo |  | `edit.repeat` | not in tabs |
 | Undo | Undo | Ctrl+z | `edit.undo` | has options menu; not in tabs |
 
-## Insert (41)
+## Insert (44)
 
 | Command | Group | Shortcut | ID | Notes |
 |---|---|---|---|---|
@@ -206,12 +211,15 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 | Table | Tables |  | `insert.table` |  |
 | Table from Text… | Tables |  | `insert.tableFromText` |  |
 | Caption | Text |  | `insert.caption` |  |
+| Inline Picture | Text |  | `insert.inlinePicture` | inspired by Inline graphics (PageMaker, Ventura Publisher) |
+| Inline Text Frame | Text |  | `insert.inlineFrame` |  |
 | Place Text File… | Text | Ctrl+Shift+d | `insert.textFile` | inspired by Place (PageMaker), Get Text (QuarkXPress) |
 | Placeholder Text | Text |  | `insert.placeholderText` | inspired by Lorem ipsum fill (page layout programs) |
 | Pull Quote | Text |  | `insert.pullQuote` | inspired by Pull quotes (magazine layout) |
 | Sidebar | Text |  | `insert.sidebar` |  |
 | Table of Contents | Text |  | `insert.toc` | inspired by Generated contents (Ventura Publisher, FrameMaker) |
 | Text Frame | Text | Ctrl+Shift+t, t | `insert.textFrame` |  |
+| Text on a Path | Text |  | `insert.textOnPath` | has options menu; inspired by Text on a path (CorelDRAW, Illustrator, InDesign) |
 
 ## Page Design (46)
 
@@ -264,7 +272,7 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 | Page Background | Schemes |  | `page.background` |  |
 | Swatches | Schemes | F5 | `page.swatchesPane` |  |
 
-## Text (41)
+## Text (51)
 
 | Command | Group | Shortcut | ID | Notes |
 |---|---|---|---|---|
@@ -276,6 +284,16 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 | Text Frame Options… | Frame Options | Ctrl+Alt+b | `text.frameOptions` |  |
 | Vertical Alignment | Frame Options |  | `text.verticalAlign` | has options menu |
 | Vertical Text | Frame Options |  | `text.vertical` | not in tabs |
+| Delete Footnote | Notes |  | `text.deleteFootnote` |  |
+| Edit Footnote… | Notes |  | `text.editFootnote` |  |
+| Endnotes to Footnotes | Notes |  | `text.endnotesToFootnotes` |  |
+| Footnote Options… | Notes |  | `text.footnoteOptions` | not in tabs |
+| Footnotes | Notes |  | `text.footnotesPane` |  |
+| Footnotes to Endnotes | Notes |  | `text.footnotesToEndnotes` |  |
+| Go to Reference | Notes |  | `text.goToReference` |  |
+| Insert Footnote | Notes | Ctrl+Alt+f | `text.insertFootnote` | inspired by Footnotes (Ventura Publisher, FrameMaker, InDesign) |
+| Next Footnote | Notes |  | `text.nextFootnote` |  |
+| Previous Footnote | Notes |  | `text.prevFootnote` |  |
 | Keep Lines Together | Paragraph Flow |  | `fmt.keepLines` |  |
 | Keep with Next | Paragraph Flow |  | `fmt.keepWithNext` |  |
 | Rule Above | Paragraph Flow |  | `fmt.ruleAbove` | has options menu; inspired by Paragraph rules (Ventura Publisher) |
@@ -310,7 +328,7 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 | Text Language | Typography |  | `fmt.language` | not in tabs |
 | Tracking | Typography |  | `fmt.tracking` |  |
 
-## Arrange (67)
+## Arrange (81)
 
 | Command | Group | Shortcut | ID | Notes |
 |---|---|---|---|---|
@@ -326,6 +344,11 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 | Center on Page | Align |  | `arrange.centerOnPage` | not in tabs |
 | Distribute Horizontally | Align |  | `arrange.distributeH` |  |
 | Distribute Vertically | Align |  | `arrange.distributeV` |  |
+| Anchor Above Line | Anchor |  | `arrange.anchorAbove` |  |
+| Anchor at Offset | Anchor |  | `arrange.anchorCustom` |  |
+| Anchor Inline | Anchor |  | `arrange.anchorInline` | inspired by Inline graphics (PageMaker, Ventura, InDesign anchored objects) |
+| Anchor Options… | Anchor |  | `arrange.anchorOptions` | not in tabs |
+| Release Anchor | Anchor |  | `arrange.releaseAnchor` |  |
 | Group | Group | Ctrl+Shift+g | `arrange.group` |  |
 | Hide | Group | Ctrl+3 | `arrange.hide` |  |
 | Lock | Group | Ctrl+Alt+l | `arrange.lock` |  |
@@ -374,6 +397,15 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 | New Layer… | Size and Position |  | `arrange.newLayer` | not in tabs |
 | Size and Position… | Size and Position | Ctrl+Shift+s | `arrange.sizeDialog` |  |
 | Step and Repeat… | Size and Position | Ctrl+Alt+u | `arrange.stepRepeat` | inspired by Step and Repeat (QuarkXPress, InDesign) |
+| Align on Path | Text Path |  | `path.align` | has options menu |
+| Baseline Shift… | Text Path |  | `path.baseline` |  |
+| Character Spacing… | Text Path |  | `path.spacing` |  |
+| Edit Path Text… | Text Path |  | `path.editText` |  |
+| Flip to Other Side | Text Path |  | `path.flip` |  |
+| From Shape | Text Path |  | `path.fromShape` |  |
+| Release to Text Frame | Text Path |  | `path.release` |  |
+| Show Path | Text Path |  | `path.showPath` |  |
+| Start Offset… | Text Path |  | `path.offset` |  |
 | Behind Text | Text Wrap |  | `arrange.wrapBehind` | not in tabs |
 | Jump Object | Text Wrap |  | `arrange.wrapTopBottom` |  |
 | No Wrap | Text Wrap |  | `arrange.wrapNone` |  |
@@ -611,18 +643,18 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 | Insert Left | Rows & Columns |  | `table.insertLeft` |  |
 | Insert Right | Rows & Columns |  | `table.insertRight` |  |
 
-## Planned, not yet implemented (32)
+## Planned, not yet implemented (23)
 
 These ids are in the plan but have no command yet. A command is only registered when it works; nothing below is a placeholder in the app.
 
 - **area**: `area.name`
-- **file**: `file.dataMerge`, `file.export.epub`, `file.export.pdfx`, `file.import.idml`, `file.import.mif`, `file.import.pdf`, `file.import.pmd`, `file.import.pub`, `file.import.qxp`
+- **file**: `file.dataMerge`, `file.export.epub`, `file.export.pdfx`, `file.import.pdf`
 - **fmt**: `fmt.characterPalette`, `fmt.openTypeFeatures`
-- **insert**: `insert.anchoredObject`, `insert.barcode`, `insert.chart`, `insert.crossReference`, `insert.footnote`, `insert.qrCode`
+- **insert**: `insert.barcode`, `insert.chart`, `insert.crossReference`, `insert.qrCode`
 - **page**: `page.alternateLayouts`, `page.liquidLayout`, `page.spreadsMulti`
 - **picture**: `picture.clippingPath`, `picture.colorProfile`
 - **review**: `review.compareVisual`, `review.trackChanges`
 - **shape**: `shape.blend`, `shape.booleanOps`
-- **text**: `text.footnotes`, `text.onPath`, `text.optMargin`
+- **text**: `text.optMargin`
 - **tools**: `tools.scriptEditor`
 - **view**: `view.splitWindow`

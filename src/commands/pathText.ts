@@ -77,7 +77,9 @@ def([
     id: 'insert.textOnPath', label: 'Text on a Path', icon: 'gesture', tab: 'Insert', group: 'Text', kind: 'menu', edits: true, origin: 'Text on a path (CorelDRAW, Illustrator, InDesign)',
     tip: 'Text set along a line, an arc, a circle, a wave or a zigzag; or convert a shape with Text Path ▸ From Shape',
     menu: () => [...presetEntries(), { separator: true }, { id: 'path.fromShape', label: 'From the Selected Shape or Line' }],
-    run: async (app, preset?: string, text?: string) => {
+    run: async (app, arg?: string | { preset?: string; text?: string }) => {
+      const preset = typeof arg === 'string' ? arg : arg?.preset;
+      const text = typeof arg === 'object' ? arg?.text : undefined;
       if (!preset || !PATH_TEXT_PRESETS[preset]) { showMenu(presetEntries(), { anchor: app.ui.anchorFor('insert.textOnPath'), onPick: (e) => app.exec('insert.textOnPath', e.arg) }); return; }
       const p = PATH_TEXT_PRESETS[preset];
       const b = placeNew(app, p.box[0], p.box[1]);

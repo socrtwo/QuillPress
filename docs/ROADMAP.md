@@ -35,11 +35,14 @@
 ## M4 — Layout depth
 
 - [x] Templates (newsletter, brochure, flyer, poster, business card, invoice, menu, résumé, booklet, postcard, report); color and font schemes; layout guides; step and repeat; paste in place; master item overrides.
-- [ ] Anchored objects; footnotes; text on a path; optical margin alignment; OpenType features; user fonts from files; clipping paths for tight wrap.
+- [x] Anchored objects (inline, above the line, custom offset) that move with the text; footnotes at the bottom of the column with numbering schemes, separators, endnote conversion and a pane; text on a path (line, arcs, circle, wave, zigzag, any shape) in the editor, SVG and PDF.
+- [x] PDF export embeds the publication's fonts as subsets (standard 14 only for fonts the app does not bundle).
+- [ ] Optical margin alignment; OpenType features; user fonts from files; clipping paths for tight wrap; footnotes inside tables and path text; in-place editing of footnote text.
 
 ## M5 — Interchange
 
-- [ ] IDML import (then export); Microsoft Publisher import; FrameMaker MIF; QuarkXPress tags; PDF placement; EPUB and PDF/X export; data merge.
+- [x] IDML import (spreads, masters, linked frames, stories, styles, swatches, links); FrameMaker MIF and XPress Tags import; Publisher, QuarkXPress, PageMaker and INDD files open with their text and pictures (their layouts are not public formats).
+- [ ] IDML export; PDF placement; EPUB and PDF/X export; data merge.
 
 ## M6 — Collaboration and suite
 

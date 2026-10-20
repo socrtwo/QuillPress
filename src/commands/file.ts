@@ -163,9 +163,12 @@ function chosenPages(app: App, which: string): Page[] | undefined {
 }
 
 async function makePdf(app: App, o: { pages?: Page[]; bleed?: boolean; marks?: boolean; quality?: string; spreads?: boolean } = {}): Promise<Uint8Array> {
-  const { pubToPdf } = await import('../export/pdf');
+  const { pubToPdf, lastPdfWarnings } = await import('../export/pdf');
   const px = o.quality === 'small' ? 1000 : o.quality === 'high' ? 4000 : 2000;
-  return pubToPdf(app.pub, { pages: o.pages?.map((p) => p.id), bleed: o.bleed, marks: o.marks, spreads: o.spreads, maxImagePx: px, quality: o.quality === 'small' ? 0.7 : o.quality === 'high' ? 0.95 : 0.85, onProgress: (d, t) => app.ui.status?.(`Creating PDF… page ${d} of ${t}`) });
+  const out = await pubToPdf(app.pub, { pages: o.pages?.map((p) => p.id), bleed: o.bleed, marks: o.marks, spreads: o.spreads, maxImagePx: px, quality: o.quality === 'small' ? 0.7 : o.quality === 'high' ? 0.95 : 0.85, onProgress: (d, t) => app.ui.status?.(`Creating PDF… page ${d} of ${t}`) });
+  const warn = lastPdfWarnings();
+  if (warn.length) toast(`PDF fonts: ${warn.slice(0, 3).join('; ')}${warn.length > 3 ? '…' : ''}`, { ms: 7000 });
+  return out;
 }
 
 def([

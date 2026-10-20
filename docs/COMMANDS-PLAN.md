@@ -28,6 +28,10 @@ File: new, open, recover, save, export, print, share, info, options.
 - `file.openRecent` — Open Recent File
 - `file.recoverAny` — Recover Data from Any File: Extract readable text and pictures from any file, however damaged
 - `file.recoveryReport` — Recovery Report
+- `file.import.idml` — Import InDesign (IDML)…: Spreads, masters, linked frames, stories, styles, swatches and links from an .idml package; .indd files give their text and pictures
+- `file.import.layoutFile` — Import Publisher, QuarkXPress or PageMaker File…: Text and pictures recovered from .pub, .qxp, .qxd, .qxt, .pmd, .p65, .pm6, .pmt and .indd files (their layouts are not public formats)
+- `file.import.xpressTags` — Import XPress Tags…: Styled text from .xtg files
+- `file.import.mif` — Import FrameMaker MIF…: Pages, paragraph catalog, text flows and variables from .mif files
 
 ### Save
 
@@ -871,11 +875,6 @@ These ids are reserved for later milestones (see [ROADMAP.md](ROADMAP.md)); they
 - `picture.colorProfile` — Color profile tagging
 - `shape.booleanOps` — Pathfinder union/subtract/intersect of shapes
 - `shape.blend` — Blend modes
-- `file.import.pub` — Open Microsoft Publisher files
-- `file.import.idml` — Open InDesign IDML
-- `file.import.qxp` — Open QuarkXPress files
-- `file.import.pmd` — Open PageMaker files
-- `file.import.mif` — Open FrameMaker MIF
 - `file.import.pdf` — Place PDF pages as pictures
 - `file.export.epub` — Reflowable EPUB export
 - `file.export.pdfx` — PDF/X-1a and PDF/X-4 output with embedded fonts

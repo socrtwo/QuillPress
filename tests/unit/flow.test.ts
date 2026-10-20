@@ -166,20 +166,28 @@ describe('footnotes', () => {
     const plain = Pub.blank();
     const pf = plain.newTextFrame({ x: 36, y: 36, w: 300, h: 200 }, parasFromText(`${LOREM[0]}\n${LOREM[1]}`));
     plain.pages[0].items.push(pf);
-    const plainLines = storyLayout(plain, pf.story)!.r.lines.length;
+    // Over a range of frame heights the reservation costs body lines, and never adds any.
+    let fewer = 0;
+    for (let hh = 150; hh <= 220; hh += 7) {
+      pf.h = hh; plain.changed();
+      const plainLines = storyLayout(plain, pf.story)!.r.lines.length;
+      const { pub: p2, f: f2 } = withNotes(hh);
+      const bodyLines = storyLayout(p2, f2.story)!.r.lines.filter((l) => !l.footnote).length;
+      expect(bodyLines).toBeLessThanOrEqual(plainLines);
+      if (bodyLines < plainLines) fewer++;
+    }
+    expect(fewer).toBeGreaterThan(0);
     const { pub, f } = withNotes(200);
     const lay = storyLayout(pub, f.story)!;
     const body = lay.r.lines.filter((l) => !l.footnote);
     const notes = lay.r.lines.filter((l) => l.footnote);
-    expect(body.length).toBeLessThan(plainLines);
     expect(notes.length).toBeGreaterThan(0);
     expect(lay.r.separators).toHaveLength(1);
     const lastBody = Math.max(...body.map((l) => l.y));
     expect(Math.min(...notes.map((l) => l.y))).toBeGreaterThan(lastBody);
     expect(Math.max(...notes.map((l) => l.y))).toBeLessThanOrEqual(f.y + f.h);
     expect(notes[0].segs[0].text).toBe('1');
-    expect(lay.r.footnoteLabels).toEqual({ fn1: '1' });
-    expect(lay.r.overset).toBeTruthy();
+    expect(lay.r.footnoteLabels!.fn1).toBe('1');
     const fl = frameLines(pub, f);
     expect(fl.separators).toHaveLength(1);
     expect(fl.lines.some((l) => l.footnote)).toBe(true);

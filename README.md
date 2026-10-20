@@ -6,14 +6,17 @@ An original, open-source desktop publishing and page layout app for Android, iOS
 
 > **Status: first working version (0.1.0, milestone M1 with much of M2–M4).** The app builds for the web, Android, iOS and desktop with the same CI and release workflows as the sister apps. What works today:
 >
-> - **502 commands**; 502 of the 534 ids in the plan are implemented, and the 32 reserved for later milestones are listed in [docs/COMMANDS.md](docs/COMMANDS.md). A command is registered only when it works.
+> - **533 commands**; 533 of the 556 ids in the plan are implemented, and the 23 reserved for later milestones are listed in [docs/COMMANDS.md](docs/COMMANDS.md). A command is registered only when it works.
 > - **Layout:** pages on master pages, facing pages and spreads, margins, columns, guides, a document grid and a baseline grid; text frames with columns, insets and vertical alignment, linked into chains across pages; autoflow; overset marks; pictures with fitting, cropping, adjustments and text wrap; 90+ preset shapes; lines; tables; groups; layers; snapping and smart guides; undo/redo.
 > - **Text:** an original layout engine with justification, hyphenation, drop caps, bullets and numbering, tabs with leaders, rules, keep options and baseline-grid alignment; paragraph, character and object style sheets; fields (page number, page count, section, date, variables, continued-on/from); typographer's quotes; a story editor.
 > - **Files:** native .qpp (and AES-256 .qppe) and Scribus .sla open and save; text, Markdown, RTF, Word and HTML files place into frames; pictures (PNG, JPEG, GIF, WebP, BMP, TIFF, SVG) place into frames or open as pages; export to PDF (the app's own vector writer with page labels, trim box and crop marks), SVG, PNG/JPEG, a web page, text and Markdown, and a package ZIP. Damaged files go through the recovery pipeline. See [docs/FORMATS.md](docs/FORMATS.md) and [docs/RECOVERY.md](docs/RECOVERY.md).
 > - **Review:** spelling in every variety of English and 90+ downloadable dictionaries, preflight, fonts and pictures panes, accessibility check, comments, reading level and statistics.
 > - **AI tab** with the suite's setup wizard, on-device model and several-AI (master or Quaker consensus) modes: draft a whole publication onto laid-out pages, draft stories, headlines, decks, pull quotes, captions, rewriting, copy fitting by rewriting, alt text and layout suggestions. See [docs/AI.md](docs/AI.md).
 >
-> Not yet: text on a path, footnotes, anchored objects, data merge, EPUB and PDF/X output, and opening Microsoft Publisher, InDesign, QuarkXPress or PageMaker files (see [docs/FORMATS-PLAN.md](docs/FORMATS-PLAN.md)). PDF export sets text in the standard PDF fonts closest to the publication's fonts; the print path keeps the exact screen fonts. Scribus round trips are tested in code, not yet against Scribus itself.
+> - **Layout depth:** anchored objects (inline, above the line or at a custom offset) that move with the text; footnotes set at the bottom of the column with numbering schemes, separators, endnote conversion and a Footnotes pane; text on a path (line, arcs, circle, wave, zigzag, or any shape) that prints the same way in SVG and PDF.
+> - **Interchange:** InDesign IDML opens with its spreads, master spreads, linked frames, stories, paragraph and character styles, swatches, layers and picture links; XPress Tags and FrameMaker MIF open as styled text; Publisher, QuarkXPress, PageMaker and INDD files open with their text and pictures recovered (their layouts are not public formats).
+>
+> Not yet: IDML export, data merge, EPUB and PDF/X output, PDF placement, optical margin alignment, user fonts from files, footnotes inside tables and path text (see [docs/FORMATS-PLAN.md](docs/FORMATS-PLAN.md) and [docs/ROADMAP.md](docs/ROADMAP.md)). PDF export embeds the publication's fonts as subsets; fonts QuillPress does not bundle print in the closest standard face. Scribus round trips are tested in code, not yet against Scribus itself.
 
 ## Features and plan
 
@@ -34,10 +37,13 @@ An original, open-source desktop publishing and page layout app for Android, iOS
 |---|---|---|---|
 | QuillPress publication (.qpp) and encrypted (.qppe) | Yes | Yes | Native ZIP package (JSON + pictures); AES-256 for .qppe |
 | Scribus document (.sla) | Yes | Yes | Scribus 1.4 and 1.5 XML: pages, masters, linked frames, styles, colors, embedded pictures |
+| InDesign Markup (.idml) | Yes | No | Spreads, master spreads, linked frames and stories, styles, swatches, layers, sections, picture links |
+| XPress Tags (.xtg), FrameMaker MIF (.mif) | Yes | No | Styled text; MIF also pages, text flows and variables |
+| Publisher (.pub), QuarkXPress (.qxp .qxd .qxt), PageMaker (.pmd .p65 .pm6 .pmt), InDesign binary (.indd) | Text and pictures | No | Layout is not recovered (no public specification); the text flows into margin frames and the pictures follow |
 | QuillPress JSON (.json) | Yes | Yes | The publication as plain JSON |
 | Text, Markdown, Rich Text, Word, HTML (.txt, .md, .rtf, .docx, .html) | Place or open | Text and Markdown export | Headings and lists become paragraph styles |
 | Pictures (.png, .jpg, .gif, .webp, .bmp, .tif, .svg) | Place or open | SVG, PNG, JPEG export | TIFF is decoded in the app |
-| PDF | No (planned) | Yes | Vector text and graphics, page labels, trim and bleed boxes, crop marks |
+| PDF | No (planned) | Yes | Vector graphics, text in the publication's fonts embedded as subsets, page labels, trim and bleed boxes, crop marks |
 | HTML | Place | Yes | One self-contained page with every publication page as vector graphics |
 | Package (.zip) | No | Yes | .qpp, .sla, PDF, web page, every picture and a report |
 

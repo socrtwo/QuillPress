@@ -11,10 +11,11 @@
  * (Helvetica, Times, Courier), keeping their positions and sizes.
  */
 import type { Pub } from '../model/pub';
-import type { Item, Page, Fill, Line, TextFrame, Master, Paragraph } from '../model/types';
+import type { Item, Page, Fill, Line, TextFrame, Master, Paragraph, PathTextItem } from '../model/types';
 import { colorHex } from '../model/styles';
 import { geometryPath } from '../model/geometry';
-import { frameBoxes, frameLines, layoutOptions } from '../render/flow';
+import { frameBoxes, frameLines, layoutOptions, syncAnchors } from '../render/flow';
+import { pathTextLayout, pathPolyline, localToPage } from '../render/pathText';
 import { layoutStory, type LaidLine, type FlowBox } from '../render/text';
 import { unb64 } from '../io/xml';
 import { decodePng } from '../io/png';
@@ -263,17 +264,20 @@ function smallCapsChunks(text: string, size: number): { text: string; size: numb
  * Identity-H), otherwise in the standard font that stdFont() picks. Characters the embedded face lacks
  * are set in the standard font so nothing is dropped.
  */
-async function textOps(ctx: Ctx, text: string, family: string | undefined, bold: boolean | undefined, italic: boolean | undefined, size: number, x: number, y: number, color: [number, number, number], spc: number, caps: 'all' | 'small' | 'none' | undefined): Promise<string> {
+async function textOps(ctx: Ctx, text: string, family: string | undefined, bold: boolean | undefined, italic: boolean | undefined, size: number, x: number, y: number, color: [number, number, number], spc: number, caps: 'all' | 'small' | 'none' | undefined, angle = 0): Promise<string> {
   const [r, g, b] = color;
+  // Text matrix for y-down page coordinates: the baseline runs along `angle` (degrees, clockwise).
+  const ca = Math.cos((angle * Math.PI) / 180), sa = Math.sin((angle * Math.PI) / 180);
+  const tm = (adv: number, skew = false) => `${n(ca)} ${n(sa)} ${n(sa + (skew ? 0.2 * ca : 0))} ${n(-ca + (skew ? 0.2 * sa : 0))} ${n(x + adv * ca)} ${n(y + adv * sa)} Tm`;
   const fill = `${n(r)} ${n(g)} ${n(b)} rg`;
   const std = stdFont(family, bold, italic);
   const face = ctx.opts.embedFonts === false ? null : await ctx.fontSet.face(family, bold, italic);
   const chunks = caps === 'small' ? smallCapsChunks(text, size) : [{ text: caps === 'all' ? text.toUpperCase() : text, size }];
   const ops: string[] = [];
-  let cx = x;
+  let cx = 0;
   const stdOp = (t: string, sz: number) => {
     const f = fontKey(ctx, std);
-    ops.push(`BT ${fill} ${f} ${n(sz)} Tf${spc ? ` ${n(spc)} Tc` : ''} 1 0 0 -1 ${n(cx)} ${n(y)} Tm ${pdfText(t)} Tj ET`);
+    ops.push(`BT ${fill} ${f} ${n(sz)} Tf${spc ? ` ${n(spc)} Tc` : ''} ${tm(cx)} ${pdfText(t)} Tj ET`);
     cx += textWidth(t, sz, std) + spc * [...t].length;
   };
   for (const ch of chunks) {
@@ -282,7 +286,7 @@ async function textOps(ctx: Ctx, text: string, family: string | undefined, bold:
     for (const piece of ctx.fontSet.encode(face, ch.text, ch.size, spc)) {
       if ('hex' in piece) {
         const synth = face.synthBold ? ` 2 Tr ${n(piece.size / 30)} w ${n(r)} ${n(g)} ${n(b)} RG` : '';
-        ops.push(`BT ${fill} ${res} ${n(piece.size)} Tf${spc ? ` ${n(spc)} Tc` : ''}${synth} 1 0 ${face.synthItalic ? '0.2' : '0'} -1 ${n(cx)} ${n(y)} Tm <${piece.hex}> Tj ET${synth ? ' 0 Tr' : ''}`);
+        ops.push(`BT ${fill} ${res} ${n(piece.size)} Tf${spc ? ` ${n(spc)} Tc` : ''}${synth} ${tm(cx, !!face.synthItalic)} <${piece.hex}> Tj ET${synth ? ' 0 Tr' : ''}`);
         cx += piece.width;
       } else {
         stdOp(piece.fallback, piece.size);
@@ -411,11 +415,34 @@ async function rasterize(mime: string, bytes: Uint8Array, maxPx: number, quality
   } catch { return pngFallback(mime, bytes, maxPx); }
 }
 
+/** Text on a path: one positioned, rotated glyph per character (page coordinates from pathTextLayout). */
+async function pathTextOps(ctx: Ctx, e: PathTextItem, out: string[]): Promise<void> {
+  const pub = ctx.pub;
+  const r = pathTextLayout(e, layoutOptions(pub, []));
+  out.push('q');
+  if (e.alpha != null && e.alpha < 1) out.push(`/GSa${Math.round(e.alpha * 100)} gs`);
+  if (e.showPath) {
+    const so = strokeOp(ctx, e.line ?? { fill: { type: 'solid', color: 'Black' }, width: 0.5 });
+    const pts = pathPolyline(e).map((p) => localToPage(e, p));
+    if (so && pts.length > 1) out.push(`q ${so} ${pts.map((p, i) => `${n(p.x)} ${n(p.y)} ${i ? 'l' : 'm'}`).join(' ')} S Q`);
+  }
+  for (const g of r.glyphs) {
+    if (!g.ch.trim()) continue;
+    const st = g.style;
+    const a = (g.angle * Math.PI) / 180;
+    // The glyph's origin sits half an advance before its center, along the baseline.
+    const ox = g.x - (g.w / 2) * Math.cos(a), oy = g.y - (g.w / 2) * Math.sin(a);
+    out.push(await textOps(ctx, g.ch, g.font, st.b, st.i, g.size, ox, oy, rgb(colorHex(pub.data, st.color)), 0, st.caps, g.angle));
+  }
+  out.push('Q');
+}
+
 async function itemOps(ctx: Ctx, e: Item, owner: Page | Master, fromMaster: boolean, out: string[]): Promise<void> {
   if (e.hidden) return;
   const layer = ctx.pub.layer(e.layer);
   if (layer?.hidden) return;
   const pub = ctx.pub;
+  if (e.kind === 'pathText') { await pathTextOps(ctx, e, out); return; }
   out.push('q');
   const cx = e.x + e.w / 2, cy = e.y + e.h / 2;
   if (e.rot) { const a = (e.rot * Math.PI) / 180; out.push(`1 0 0 1 ${n(cx)} ${n(cy)} cm ${n(Math.cos(a))} ${n(Math.sin(a))} ${n(-Math.sin(a))} ${n(Math.cos(a))} 0 0 cm 1 0 0 1 ${n(-cx)} ${n(-cy)} cm`); }
@@ -440,10 +467,14 @@ async function itemOps(ctx: Ctx, e: Item, owner: Page | Master, fromMaster: bool
       const fo = fillOp(ctx, fill), so = strokeOp(ctx, line);
       if (fo || so) out.push(`q ${fo || ''} ${so || ''} ${local(d)} ${fo && so ? 'B' : fo ? 'f' : 'S'} Q`);
       let lines: LaidLine[];
+      let separators: { x: number; y: number; w: number }[] = [];
       if (fromMaster) { const story = pub.story(e.story); const boxes: FlowBox[] = frameBoxes(e, owner, ctx.pageIndex, pub); lines = story ? layoutStory(story.paras, layoutOptions(pub, boxes, { anchor: (e.columns || 1) === 1 ? e.anchor : undefined })).lines : []; }
-      else lines = frameLines(pub, e).lines;
+      else { const fl = frameLines(pub, e); lines = fl.lines; separators = fl.separators; }
       out.push(`q ${local(d)} W n 1 0 0 1 ${n(-e.x)} ${n(-e.y)} cm`);
       out.push(await linesOps(ctx, lines));
+      // Footnote separators: a rule above the notes at the bottom of a column.
+      const sepW = pub.data.footnoteOptions?.separator.width ?? 0.5;
+      for (const sp of separators) if (sepW > 0) out.push(`q 0 G ${n(sepW)} w ${n(sp.x)} ${n(sp.y)} m ${n(sp.x + sp.w)} ${n(sp.y)} l S Q`);
       out.push('Q');
       break;
     }
@@ -516,6 +547,8 @@ async function itemOps(ctx: Ctx, e: Item, owner: Page | Master, fromMaster: bool
 
 /** Builds the PDF for the publication. */
 export async function pubToPdf(pub: Pub, opts: PdfOptions = {}): Promise<Uint8Array> {
+  // Anchored objects sit where the text flow last put them.
+  syncAnchors(pub);
   const w = new Writer();
   const fonts = new Map<string, number>(), images = new Map<string, { obj: number; w: number; h: number }>();
   const fontRes: string[] = [], imgRes: string[] = [];

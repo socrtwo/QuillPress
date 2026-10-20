@@ -59,6 +59,7 @@ export function anchorObjects(app: App, mode: Mode, ids?: string[], opts: Partia
         storyLayout(pub, story.id);
         const ap = anchorPointOf(pub, e.id);
         if (ap) { e.anchored.dx = Math.round((before.x - ap.x) * 100) / 100; e.anchored.dy = Math.round((before.y - ap.y) * 100) / 100; }
+        e.x = before.x; e.y = before.y;
       }
     }
     pub.version++;

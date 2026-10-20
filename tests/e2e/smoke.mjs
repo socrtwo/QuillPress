@@ -52,6 +52,38 @@ try {
   await p.evaluate(() => qp.exec('edit.redo'));
   check('redo', await p.evaluate(() => !!qp.pub.story(qp.page.items[0].story).paras[0].runs[0].b), true);
 
+  // A footnote inserted while editing shows its note at the bottom of the frame, starting with its number.
+  await p.mouse.dblclick(box[0], box[1]);
+  await p.keyboard.press('End');
+  await p.evaluate(() => qp.exec('text.insertFootnote', 'Source'));
+  await p.waitForTimeout(200);
+  check('footnote stored', await p.evaluate(() => { const s = qp.pub.story(qp.page.items[0].story); return [s.footnotes.length, s.paras[0].runs.at(-1).footnote === s.footnotes[0].id, s.paras[0].runs.at(-1).text]; }), [1, true, '1']);
+  check('footnote drawn', await p.evaluate(() => { const g = document.querySelector(`.qp-page-host [data-id="${qp.page.items[0].id}"]`); const spans = [...g.querySelectorAll('tspan')].map((t) => t.textContent); return [spans.includes('1'), g.textContent.includes('Source'), !!g.querySelector('.qp-fn-sep')]; }), [true, true, true]);
+
+  // Text on a path draws rotated glyphs.
+  await p.evaluate(() => qp.exec('insert.textOnPath', { preset: 'arcUp', text: 'Curved words' }));
+  await p.waitForTimeout(150);
+  check('path text', await p.evaluate(() => { const e = qp.page.items.at(-1); const g = [...document.querySelectorAll(`.qp-page-host [data-id="${e.id}"] .qp-pathtext-glyphs text`)]; const angles = g.map((t) => +/rotate\(([-\d.]+)\)/.exec(t.getAttribute('transform'))[1]); return [e.kind, g.length, angles.some((a) => a > 5 && a < 355)]; }), ['pathText', 11, true]);
+
+  // An inline anchored object moves down when a paragraph is added before its anchor.
+  await p.evaluate(() => { const f = qp.page.items[0]; qp.pub.transact('Add box', () => { qp.page.items.push({ id: 'anc', kind: 'shape', geom: 'rect', x: 500, y: 600, w: 40, h: 20 }); }); qp.tab.ui.select([f.id, 'anc']); qp.exec('arrange.anchorInline'); });
+  await p.waitForTimeout(200);
+  const ancBefore = await p.evaluate(() => { const e = qp.page.items.find((x) => x.id === 'anc'); return [e.anchored.mode, e.x, e.y]; });
+  check('anchored inline', [ancBefore[0], ancBefore[1] < 400, ancBefore[2] < 500], ['inline', true, true]);
+  await p.evaluate(() => { const s = qp.pub.story(qp.page.items[0].story); qp.pub.transact('Paragraph before', () => { s.paras.unshift({ style: 'Body', runs: [{ text: 'A paragraph added before the anchor pushes the object down the frame.' }] }); }); });
+  await p.waitForTimeout(200);
+  check('anchored object moved', await p.evaluate((y0) => qp.page.items.find((x) => x.id === 'anc').y > y0, ancBefore[2]), true);
+  // Editing the frame keeps the anchor placeholder and the footnote reference as runs.
+  await p.evaluate(() => { qp.tab.ui.select([]); });
+  const box2 = await p.evaluate(() => { const r = document.querySelector(`.qp-page-host [data-id="${qp.page.items[0].id}"]`).getBoundingClientRect(); return [r.x + r.width / 2, r.y + 12]; });
+  await p.mouse.dblclick(box2[0], box2[1]);
+  check('placeholders in editor', await p.evaluate(() => [document.querySelectorAll('.qp-textedit .qp-anchor-ph').length, document.querySelectorAll('.qp-textedit .qp-fnref').length]), [1, 1]);
+  await p.keyboard.press('Control+End');
+  await p.keyboard.type(' tail');
+  await p.keyboard.press('Escape');
+  check('runs kept after editing', await p.evaluate(() => { const s = qp.pub.story(qp.page.items[0].story); const runs = s.paras.flatMap((p) => p.runs); return [runs.filter((r) => r.anchor).length, runs.filter((r) => r.footnote).length, s.paras.at(-1).runs.at(-1).text.endsWith(' tail'), s.footnotes.length]; }), [1, 1, true, 1]);
+  await p.evaluate(() => { qp.tab.ui.select(['anc']); qp.exec('arrange.releaseAnchor'); qp.tab.ui.select([]); });
+
   // Draw a shape by dragging on the page, then a picture frame by command.
   await p.evaluate(() => qp.exec('insert.shape', 'roundRect'));
   const st = await p.evaluate(() => { const r = document.querySelector('.qp-edit-stage').getBoundingClientRect(); return [r.x, r.y, qp.tab.ui.zoom]; });
