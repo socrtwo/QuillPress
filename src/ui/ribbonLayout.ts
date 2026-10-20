@@ -49,7 +49,7 @@ export const DEFAULT_TABS: RibbonTab[] = [
     id: 'text', label: 'Text', groups: [
       { id: 'frames', label: 'Text Frames', items: ['text.link', 'text.unlink', 'text.nextFrame', 'text.prevFrame', 'text.autoflow', 'text.threadsPane', 'text.splitStory'] },
       { id: 'frameOptions', label: 'Frame Options', items: ['text.columns', 'text.insets', 'text.verticalAlign', 'text.autosize', 'text.ignoreWrap', 'text.frameOptions'] },
-      { id: 'typography', label: 'Typography', items: ['fmt.tracking', 'fmt.kerning', 'fmt.ligatures', 'fmt.smallCaps', 'fmt.allCaps', 'fmt.baselineShift', 'fmt.hyphenation', 'fmt.baselineGridAlign', 'fmt.tabs'] },
+      { id: 'typography', label: 'Typography', items: ['fmt.tracking', 'fmt.kerning', 'fmt.ligatures', 'fmt.smallCaps', 'fmt.allCaps', 'fmt.baselineShift', 'fmt.hyphenation', 'fmt.baselineGridAlign', 'fmt.opticalMargin', 'text.opticalMarginStory', 'text.opticalMarginSize', 'fmt.tabs'] },
       { id: 'flow', label: 'Paragraph Flow', items: ['fmt.keepWithNext', 'fmt.keepLines', 'fmt.ruleAbove', 'fmt.ruleBelow', 'fmt.paragraphDialog'] },
       { id: 'notes', label: 'Notes', items: ['text.insertFootnote', 'text.editFootnote', 'text.deleteFootnote', 'text.prevFootnote', 'text.nextFootnote', 'text.goToReference', 'text.footnotesToEndnotes', 'text.endnotesToFootnotes', 'text.footnotesPane'], launcher: 'text.footnoteOptions' },
       { id: 'tools', label: 'Tools', items: ['text.fitCopy', 'text.oversetReport', 'text.storyEditor', 'text.wordCount', 'text.changeCase', 'text.insertLorem', 'tools.convertQuotes'] },

@@ -66,6 +66,8 @@ export class Workspace implements TabView {
   commitText(): void { this.canvas.commitText(); }
   select(ids: string[]): void { this.canvas.select(ids); }
   editText(id: string, selectAll?: boolean): void { this.canvas.editText(id, selectAll); }
+  /** Edits a footnote's text in place (a second island over its note lines); false when the note is not laid out. */
+  editFootnote(frameId: string, fnId: string): boolean { return this.canvas.editFootnote(frameId, fnId); }
   setZoom(z: number | 'fit' | 'width'): void { this.canvas.setZoom(z); this.spreadCanvas.fit = null; this.spreadCanvas.zoom = this.canvas.zoom; this.spreadCanvas.layout(); this.drawRulers(); }
   showPage(id: string): void { const el = this.rail.querySelector<HTMLElement>(`[data-page="${id}"]`); el?.scrollIntoView({ block: 'nearest' }); }
   focus(): void { this.canvas.focus(); }

@@ -7,6 +7,8 @@ import { geometryPath } from '../model/geometry';
 import { PATH_TEXT_PRESETS, pathTextString } from '../render/pathText';
 import { selection, edit, placeNew, insertItem, pathTextTargets } from '../edit/ops';
 import { paraText } from '../edit/textEdit';
+import { notesMarkup, parseNotesMarkup, pruneNotes } from './notes';
+import { DEFAULT_FOOTNOTE_OPTIONS } from '../model/types';
 import { openDialog, toast, showMenu } from '../ui/dialog';
 
 const hasPath = (app: App) => pathTextTargets(app).length > 0;
@@ -52,22 +54,21 @@ export function pathTextFromItem(e: Item, text?: string): PathTextItem | null {
 const presetEntries = (): MenuEntry[] => Object.entries(PATH_TEXT_PRESETS).map(([id, p]) => ({ id: 'insert.textOnPath', arg: id, label: p.label, icon: id === 'circle' ? 'circle' : id === 'line' ? 'horizontal_rule' : 'gesture' }));
 
 async function editPathText(app: App, e: PathTextItem): Promise<void> {
-  const text = e.text.map(paraText).join('\n');
-  const r = await openDialog({ title: 'Text on a Path', fields: [{ key: 't', label: 'Text', type: 'textarea', rows: 3, value: text, autofocus: true }], help: 'Font, size, bold and color apply from the Home tab while the path text is selected.' });
+  const text = notesMarkup(e.text, e.footnotes).join('\n');
+  const r = await openDialog({ title: 'Text on a Path', fields: [{ key: 't', label: 'Text', type: 'textarea', rows: 3, value: text, autofocus: true }], help: 'Font, size, bold and color apply from the Home tab while the path text is selected. Write [^note text] where a footnote reference goes; the note is set under the item.' });
   if (!r || r.t === text) return;
   setPathText(app, e, String(r.t));
 }
 
+/** Sets the text (one paragraph per line; `[^note text]` markers become footnote references). */
 export function setPathText(app: App, e: PathTextItem, text: string): void {
   const lines = text.replace(/\r\n?/g, '\n').split('\n');
   edit(app, 'Edit Path Text', () => {
-    e.text = lines.map((l, i) => {
-      const old = e.text[i];
-      if (old && paraText(old) === l) return old;
-      const fmt = old?.runs.find((x) => !x.br) || e.text[0]?.runs.find((x) => !x.br) || old?.end || {};
-      const { text: _t, br: _b, ...keep } = fmt as any;
-      return { style: old?.style || e.text[0]?.style || 'Body', runs: l ? [{ ...keep, text: l }] : [] };
-    });
+    const notes = (e.footnotes ||= []);
+    const fnStyle = (app.pub.data.footnoteOptions || DEFAULT_FOOTNOTE_OPTIONS).style;
+    const keepOf = (i: number) => { const fmt = e.text[i]?.runs.find((x) => !x.br && !x.footnote && !x.anchor) || e.text[0]?.runs.find((x) => !x.br && !x.footnote && !x.anchor) || e.text[i]?.end || {}; const { text: _t, br: _b, footnote: _f, anchor: _a, ...keep } = fmt as any; return keep; };
+    e.text = parseNotesMarkup(lines, e.text, notes, e.text[0]?.style || 'Body', fnStyle, keepOf);
+    pruneNotes({ kind: 'path', item: e });
     if (!e.text.length) e.text = [{ style: 'Body', runs: [] }];
   });
 }

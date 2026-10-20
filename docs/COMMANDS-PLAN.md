@@ -348,6 +348,9 @@ Text frames and flow, frame options, typography, paragraph flow and text tools.
 - `fmt.hyphenation` — Hyphenate: Break long words at syllable-like points so justified text has fewer gaps *(inspired by TeX hyphenation)*
 - `fmt.kerning` — Kerning: Pair kerning from the font (on by default)
 - `fmt.ligatures` — Ligatures: Standard ligatures (fi, fl) from the font
+- `fmt.opticalMargin` — Optical Margin Alignment: Hang punctuation and the open sides of letters outside the margins so the edges of the paragraph look straight *(inspired by Hanging punctuation (Gutenberg; InDesign optical margin alignment))*
+- `text.opticalMarginSize` — Optical Margin Size: The type size the overhang is tuned for (text of that size hangs by the full amount, larger text by less, smaller by more)
+- `text.opticalMarginStory` — Optical Margins for Story: Optical margin alignment for every paragraph of the selected story (a paragraph's own setting still wins)
 - `fmt.smallCaps` — Small Caps (Ctrl+Shift+k)
 - `fmt.tabs` — Tabs
 - `fmt.language` — Text Language: The language of the selected text (for spelling and hyphenation)

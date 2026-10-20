@@ -25,7 +25,7 @@ export const FORMATS: FormatDef[] = [
   { id: 'html', label: 'Web Page', ext: ['html', 'htm'], mime: 'text/html', canImport: true, canExport: false },
   { id: 'image', label: 'Picture', ext: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff'], mime: 'image/*', canImport: true, canExport: false },
   // Other page layout programs' formats (docs/FORMATS.md says how much of each is read).
-  { id: 'idml', label: 'InDesign Markup (IDML)', ext: ['idml'], mime: IDML_MIME, canImport: true, canExport: false },
+  { id: 'idml', label: 'InDesign Markup (IDML)', ext: ['idml'], mime: IDML_MIME, canImport: true, canExport: true },
   { id: 'indd', label: 'InDesign Document', ext: ['indd', 'indt'], mime: 'application/x-indesign', canImport: true, canExport: false },
   { id: 'pub', label: 'Microsoft Publisher Publication', ext: ['pub'], mime: 'application/x-mspublisher', canImport: true, canExport: false },
   { id: 'qxp', label: 'QuarkXPress Document', ext: ['qxp', 'qxd', 'qxt'], mime: 'application/vnd.quark.quarkxpress', canImport: true, canExport: false },
@@ -157,6 +157,7 @@ export async function exportPublication(pub: Pub, format: string, opts: { passwo
     }
     case 'json': return { data: (await import('./qpp')).exportJson(pub), mime: 'application/json', ext: 'json' };
     case 'sla': return { data: (await import('./sla')).exportSla(pub), mime: SLA_MIME, ext: 'sla' };
+    case 'idml': return { data: await (await import('./idmlExport')).exportIdml(pub), mime: IDML_MIME, ext: 'idml' };
     default: throw new Error(`Cannot save as ${format}`);
   }
 }

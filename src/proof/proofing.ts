@@ -209,8 +209,8 @@ export function spellTargets(pub: Publication, opts: { fromPage?: string; wrap?:
         seen.add(e.story);
         const s = storyOf(e.story);
         if (s) { for (const p of s.paras) out.push({ story: s, page, frameId: e.id, para: p }); for (const f of s.footnotes || []) for (const p of f.paras) out.push({ story: s, page, frameId: e.id, para: p }); }
-      } else if (e.kind === 'table') { for (const r of e.rows) for (const c of r.cells) for (const p of c.text) out.push({ table: e, page, frameId: e.id, para: p }); }
-      else if (e.kind === 'pathText') { for (const p of e.text) out.push({ page, frameId: e.id, para: p }); }
+      } else if (e.kind === 'table') { for (const r of e.rows) for (const c of r.cells) for (const p of c.text) out.push({ table: e, page, frameId: e.id, para: p }); for (const f of e.footnotes || []) for (const p of f.paras) out.push({ table: e, page, frameId: e.id, para: p }); }
+      else if (e.kind === 'pathText') { for (const p of e.text) out.push({ page, frameId: e.id, para: p }); for (const f of e.footnotes || []) for (const p of f.paras) out.push({ page, frameId: e.id, para: p }); }
       else if (e.kind === 'group') walk(page, e.children);
     }
   };

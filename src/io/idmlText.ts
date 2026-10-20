@@ -264,11 +264,8 @@ export interface StoryRead { story: Story; anchored: Element[]; notes: number; t
 
 interface Ctx { pub: Pub; colors: ColorTable; styles: StyleTable; paras: Paragraph[]; cur: Paragraph; paraStyle: string; paraOverrides: ParaProps; run: RunProps; cstyle: string; anchored: Element[]; notes: number; tables: number; footnotes: { id: string; paras: Paragraph[] }[]; inFootnote: boolean; fresh: boolean }
 
-/** Whether the publication model carries footnotes on stories (added by the text-features work). */
-function modelHasFootnotes(pub: Pub): boolean {
-  const s = pub.data.stories[0] as any;
-  return s ? 'footnotes' in s || !!(pub.data as any).footnoteOptions : !!(pub.data as any).footnoteOptions;
-}
+/** The publication model carries footnotes on stories (Story.footnotes); kept as a switch for older models. */
+function modelHasFootnotes(_pub: Pub): boolean { return true; }
 
 function pushRun(ctx: Ctx, run: Run): void {
   const last = ctx.cur.runs[ctx.cur.runs.length - 1];

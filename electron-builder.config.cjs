@@ -18,6 +18,7 @@ module.exports = {
     { ext: 'qpp', name: 'QuillPress Publication', role: 'Editor', mimeType: 'application/x-quillpress' },
     { ext: 'qppe', name: 'Encrypted QuillPress Publication', role: 'Editor', mimeType: 'application/x-quillpress-encrypted' },
     { ext: 'sla', name: 'Scribus Document', role: 'Editor', mimeType: 'application/x-scribus' },
+    { ext: 'idml', name: 'InDesign Markup Document', role: 'Editor', mimeType: 'application/vnd.adobe.indesign-idml-package' },
   ],
   win: {
     target: [{ target: 'nsis', arch: ['x64', 'arm64'] }, { target: 'portable', arch: ['x64'] }],

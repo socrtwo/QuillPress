@@ -113,6 +113,7 @@ function paraFields(p: ParaProps): any[] {
     { key: 'spaceAfter', label: 'Space after (pt)', type: 'number', min: 0, max: 999, value: p.spaceAfter ?? 0, half: true },
     { key: 'hyphenate', label: 'Hyphenate', type: 'checkbox', value: !!p.hyphenate, half: true },
     { key: 'gridAlign', label: 'Align to baseline grid', type: 'checkbox', value: !!p.gridAlign, half: true },
+    { key: 'opticalMargin', label: 'Optical margin alignment (hanging punctuation)', type: 'checkbox', value: !!p.opticalMargin, half: true },
     { key: 'keepWithNext', label: 'Keep with next paragraph', type: 'checkbox', value: !!p.keepWithNext, half: true },
     { key: 'keepLines', label: 'Keep lines together', type: 'checkbox', value: !!p.keepLines, half: true },
     { key: 'dropLines', label: 'Drop cap lines (0 = none)', type: 'number', min: 0, max: 10, value: p.dropCap?.lines ?? 0, half: true },
@@ -144,7 +145,7 @@ function paraFromFields(v: Record<string, any>, base: ParaProps = {}): ParaProps
   out.lineSpacingPt = v.lineSpacingPt || undefined;
   out.marL = +v.marL || undefined; out.marR = +v.marR || undefined; out.indent = +v.indent || undefined;
   out.spaceBefore = +v.spaceBefore || undefined; out.spaceAfter = +v.spaceAfter || undefined;
-  out.hyphenate = v.hyphenate || undefined; out.gridAlign = v.gridAlign || undefined; out.keepWithNext = v.keepWithNext || undefined; out.keepLines = v.keepLines || undefined;
+  out.hyphenate = v.hyphenate || undefined; out.gridAlign = v.gridAlign || undefined; out.opticalMargin = v.opticalMargin || undefined; out.keepWithNext = v.keepWithNext || undefined; out.keepLines = v.keepLines || undefined;
   out.dropCap = +v.dropLines > 1 ? { lines: +v.dropLines, chars: Math.max(1, +v.dropChars || 1) } : undefined;
   out.bullet = v.bulletKind === 'char' ? { kind: 'char', char: v.bulletChar || '•' } : v.bulletKind === 'num' ? { kind: 'num', scheme: v.scheme, startAt: +v.startAt > 1 ? +v.startAt : undefined } : undefined;
   out.ruleAbove = +v.ruleAbove > 0 ? { width: +v.ruleAbove, color: base.ruleAbove?.color || '#000000' } : undefined;
@@ -388,6 +389,34 @@ def([
     run: (app, v?: number | string) => { const n = parseFloat(String(v)); if (!isNaN(n)) applyRun(app, 'Baseline Shift', { baseline: n || undefined }); },
   },
   { id: 'fmt.hyphenation', label: 'Hyphenate', icon: 'remove', tab: 'Text', group: 'Typography', kind: 'toggle', edits: true, origin: 'TeX hyphenation', tip: 'Break long words at syllable-like points so justified text has fewer gaps', isActive: (app) => !!effectivePara(app).hyphenate, run: (app) => { const on = !!effectivePara(app).hyphenate; applyPara(app, 'Hyphenate', { hyphenate: on ? undefined : true }); } },
+  {
+    id: 'fmt.opticalMargin', label: 'Optical Margin Alignment', icon: 'format_indent_decrease', tab: 'Text', group: 'Typography', kind: 'toggle', edits: true, origin: 'Hanging punctuation (Gutenberg; InDesign optical margin alignment)',
+    tip: 'Hang punctuation and the open sides of letters outside the margins so the edges of the paragraph look straight (the editing island shows the text unhung)',
+    isActive: (app) => !!effectivePara(app).opticalMargin,
+    run: (app) => { const on = !!effectivePara(app).opticalMargin; applyPara(app, 'Optical Margin Alignment', { opticalMargin: on ? undefined : true }); },
+  },
+  {
+    id: 'text.opticalMarginStory', label: 'Optical Margins for Story', icon: 'format_align_justify', tab: 'Text', group: 'Typography', kind: 'toggle', edits: true,
+    tip: 'Optical margin alignment for every paragraph of the selected story (a paragraph\'s own setting still wins)',
+    isActive: (app) => { const f = activeTextEditor()?.frame || textTargets(app)[0]; return !!(f && app.pub.story(f.story)?.opticalMargin); },
+    run: (app) => {
+      const f = activeTextEditor()?.frame || textTargets(app)[0];
+      const s = f && app.pub.story(f.story);
+      if (!s) { toast('Select a text frame first.'); return; }
+      if (activeTextEditor()) app.tab.ui.commitText();
+      app.pub.transact('Optical Margins for Story', () => { const st = app.pub.story(s.id)!; if (st.opticalMargin) delete st.opticalMargin; else st.opticalMargin = true; });
+    },
+  },
+  {
+    id: 'text.opticalMarginSize', label: 'Optical Margin Size…', icon: 'format_size', tab: 'Text', group: 'Typography', edits: true,
+    tip: 'The type size the overhang is tuned for: text of that size hangs by the full amount, larger text by less, smaller by more',
+    run: async (app, size?: number) => {
+      let v = size;
+      if (typeof v !== 'number') { const r = await openDialog({ title: 'Optical Margin Size', fields: [{ key: 's', label: 'Reference size (pt)', type: 'number', min: 1, max: 999, step: 0.5, value: app.pub.data.opticalMarginSize || 12, autofocus: true }], help: 'Set it to the body text size for the usual result. Applies to every paragraph with optical margin alignment on.' }); if (!r) return; v = +r.s; }
+      if (!(v! > 0)) return;
+      app.pub.transact('Optical Margin Size', () => { app.pub.data.opticalMarginSize = v; });
+    },
+  },
   { id: 'fmt.baselineGridAlign', label: 'Align to Baseline Grid', icon: 'align_vertical_bottom', tab: 'Text', group: 'Typography', kind: 'toggle', edits: true, tip: 'Snap this paragraph\'s baselines to the publication\'s baseline grid', isActive: (app) => !!effectivePara(app).gridAlign, run: (app) => { const on = !!effectivePara(app).gridAlign; applyPara(app, 'Align to Baseline Grid', { gridAlign: on ? undefined : true }); } },
   {
     id: 'fmt.tabs', label: 'Tabs…', icon: 'keyboard_tab', tab: 'Text', group: 'Typography', edits: true,

@@ -47,7 +47,7 @@ describe('formats table', () => {
     expect(formatFromName('x.qpp')?.id).toBe('qpp');
     expect(formatFromName('x.SLA')?.id).toBe('sla');
     expect(formatFromName('x.jpeg')?.id).toBe('image');
-    expect(FORMATS.filter((f) => f.canExport).map((f) => f.id)).toEqual(['qpp', 'qppe', 'sla', 'json']);
+    expect(FORMATS.filter((f) => f.canExport).map((f) => f.id)).toEqual(['qpp', 'qppe', 'sla', 'json', 'idml']);
     const qpp = (await exportPublication(richPub(), 'qpp')).data;
     expect(sniffFormat(qpp, 'anything.bin')).toBe('qpp');
     expect(sniffFormat(new TextEncoder().encode('<?xml version="1.0"?><SCRIBUSUTF8NEW Version="1.5.8"><DOCUMENT/></SCRIBUSUTF8NEW>'), 'a.xml')).toBe('sla');

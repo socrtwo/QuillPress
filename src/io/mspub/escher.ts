@@ -128,24 +128,26 @@ function parseSp(r: Reader, sp: EscherRecord, parentCoords: Coord, groupAbs: Coo
   return { shape, coords, groupAbs: abs };
 }
 
-function parseSpgr(r: Reader, spgr: EscherRecord, coords: Coord, groupAbs: Coord, out: EscherShape[], delay: number[], depth: number): void {
-  if (depth > 64) return;
-  let c = coords, g = groupAbs;
+function parseSpgr(r: Reader, spgr: EscherRecord, coords: Coord, groupAbs: Coord, delay: number[], depth: number): { leader: EscherShape | null; items: EscherShape[] } {
+  const items: EscherShape[] = [];
   let leader: EscherShape | null = null;
+  if (depth > 64) return { leader, items };
+  let c = coords, g = groupAbs;
   for (const rec of records(r, spgr)) {
     if (rec.type === 0xf003) {
-      const groupShapes: EscherShape[] = [];
-      parseSpgr(r, rec, c, g, groupShapes, delay, depth + 1);
-      // The first shape of a group container is the group leader; the rest are its children.
-      const lead = groupShapes.find((s) => s.children);
-      if (lead) { lead.children = groupShapes.filter((s) => s !== lead); out.push(lead); }
-      else out.push(...groupShapes);
+      const sub = parseSpgr(r, rec, c, g, delay, depth + 1);
+      if (sub.leader) { sub.leader.children = sub.items; items.push(sub.leader); }
+      else items.push(...sub.items);
     } else if (rec.type === 0xf004) {
       const res = parseSp(r, rec, c, g, delay);
       c = res.coords; g = res.groupAbs;
-      if (res.shape) { if (res.shape.children && !leader) leader = res.shape; out.push(res.shape); }
+      if (!res.shape) continue;
+      // The first shape of a group container describes the group itself; the rest are its members.
+      if (res.shape.children && !leader) leader = res.shape;
+      else { delete res.shape.children; items.push(res.shape); }
     }
   }
+  return { leader, items };
 }
 
 export function parseEscher(escher: Uint8Array): EscherInfo {
@@ -164,7 +166,7 @@ export function parseEscher(escher: Uint8Array): EscherInfo {
         }
       }
     } else if (rec.type === 0xf002) {
-      for (const sub of records(r, rec)) if (sub.type === 0xf003) parseSpgr(r, sub, { xs: 0, ys: 0, xe: 0, ye: 0 }, { xs: 0, ys: 0, xe: 0, ye: 0 }, info.shapes, info.delayIndex, 0);
+      for (const sub of records(r, rec)) if (sub.type === 0xf003) info.shapes.push(...parseSpgr(r, sub, { xs: 0, ys: 0, xe: 0, ye: 0 }, { xs: 0, ys: 0, xe: 0, ye: 0 }, info.delayIndex, 0).items);
     }
   }
   return info;
@@ -209,7 +211,7 @@ export function parseDelayStream(delay: Uint8Array): DelayPicture[] {
     const def = BLIP[rec.type];
     if (!def) { out.push({ kind: 'unknown', mime: 'application/octet-stream', data: new Uint8Array(0) }); r.seek(rec.end); if (rec.end <= rec.start - 8) break; continue; }
     const start = rec.start + def.offset + (def.oneUid.includes(rec.inst) ? 0 : 0x10);
-    let data = delay.slice(Math.min(start, rec.end), rec.end);
+    let data: Uint8Array = delay.slice(Math.min(start, rec.end), rec.end);
     if (def.kind === 'dib' && data.length >= 0x2e + 4) data = dibToBmp(data);
     out.push({ kind: def.kind, mime: def.mime, data });
     r.seek(rec.end);

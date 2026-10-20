@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { Pub, parasFromText } from '../../src/model/pub';
-import { layoutStory, bulletText, formatNumber, hyphenPoints, footnoteLabel, measure, cssFont } from '../../src/render/text';
-import { frameBoxes, storyLayout, oversetFrames, neededHeight, wrapExclusions, frameLines } from '../../src/render/flow';
-import { pathTextGlyphs, pathTextLayout, PATH_TEXT_PRESETS } from '../../src/render/pathText';
-import type { PathTextItem } from '../../src/model/types';
+import { layoutStory, bulletText, formatNumber, hyphenPoints, footnoteLabel, measure, cssFont, hangFraction } from '../../src/render/text';
+import { frameBoxes, storyLayout, oversetFrames, neededHeight, wrapExclusions, frameLines, layoutOptions } from '../../src/render/flow';
+import { pathTextGlyphs, pathTextLayout, pathTextNotes, PATH_TEXT_PRESETS } from '../../src/render/pathText';
+import { tableLayout } from '../../src/render/table';
+import { pageSvg } from '../../src/render/page';
+import type { PathTextItem, TableItem } from '../../src/model/types';
 import { autoflowStory } from '../../src/edit/flowOps';
 import { LOREM } from '../../src/templates/lorem';
 
@@ -253,5 +255,118 @@ describe('text on a path', () => {
     expect(shifted[0].x).toBeGreaterThan(140);
     const over = pathTextLayout(item('line', 'x'.repeat(400)), opts);
     expect(over.overflow).toBeGreaterThan(0);
+  });
+});
+
+describe('footnotes in tables and path text, optical margin alignment', () => {
+  const noteTable = (): TableItem => ({
+    id: 't1', kind: 'table', x: 36, y: 36, w: 300, h: 44, cols: [150, 150],
+    rows: [
+      { h: 22, cells: [{ text: [{ style: 'Table Text', runs: [{ text: 'Alpha' }, { text: '1', footnote: 'fa', baseline: 33 }] }] }, { text: [{ style: 'Table Text', runs: [{ text: 'Beta' }] }] }] },
+      { h: 22, cells: [{ text: [{ style: 'Table Text', runs: [{ text: 'Gamma' }, { text: '9', footnote: 'fb', baseline: 33 }] }] }, { text: [] }] },
+    ],
+    footnotes: [{ id: 'fa', paras: [{ style: 'Footnote', runs: [{ text: 'First table note.' }] }] }, { id: 'fb', paras: [{ style: 'Footnote', runs: [{ text: 'Second table note.' }] }] }],
+  } as TableItem);
+
+  it('sets table notes under the rows, numbered per table in reading order, and grows the drawn height', () => {
+    const pub = Pub.blank();
+    const t = noteTable();
+    pub.pages[0].items.push(t);
+    const tl = tableLayout(pub, t, 0);
+    expect(tl.rowsH).toBe(44);
+    expect(tl.w).toBe(300);
+    expect(tl.notesH).toBeGreaterThan(10);
+    expect(tl.h).toBeCloseTo(44 + tl.notesH, 6);
+    expect(t.h).toBe(44);
+    expect(tl.labels).toEqual({ fa: '1', fb: '2' });
+    expect(tl.order.map((o) => o.label)).toEqual(['1', '2']);
+    expect(t.rows[1].cells[0].text[0].runs[1].text).toBe('2');
+    expect(tl.notes.length).toBeGreaterThanOrEqual(2);
+    for (const l of tl.notes) { expect(l.footnote).toBe(true); expect(l.y).toBeGreaterThan(tl.rowsH); }
+    expect(tl.notes.find((l) => l.footnoteId === 'fb')!.y).toBeGreaterThan(tl.notes.find((l) => l.footnoteId === 'fa')!.y);
+    expect(tl.separator!.y).toBeGreaterThan(tl.rowsH);
+    expect(tl.separator!.y).toBeLessThan(tl.notes[0].y);
+    // Without notes the layout is the plain grid.
+    const plain = tableLayout(pub, { ...noteTable(), footnotes: undefined }, 0);
+    expect(plain.notesH).toBe(0);
+    expect(plain.h).toBe(44);
+    const svg = pageSvg(pub, pub.pages[0], { mode: 'export' });
+    expect(svg).toContain('qp-table-notes');
+    expect(svg).toContain('>First<');
+    expect(svg).toContain('>Second<');
+    expect(svg).toContain('qp-fn-sep');
+    // Symbols scheme applies to table notes too.
+    pub.data.footnoteOptions = { ...pub.data.footnoteOptions!, scheme: 'symbols', restart: 'story', separator: { width: 0.5, length: 0.33, space: 6 }, style: 'Footnote', placement: 'column' };
+    expect(tableLayout(pub, t, 0).labels).toEqual({ fa: '*', fb: '†' });
+  });
+
+  it('sets a path text footnote as a smaller raised glyph and its note under the item box', () => {
+    const pub = Pub.blank();
+    const item = { id: 'p1', kind: 'pathText', x: 100, y: 200, w: 200, h: 100, path: { d: PATH_TEXT_PRESETS.line.d, w: 200, h: 100 }, text: [{ style: 'Body', runs: [{ text: 'Hi', size: 12 }, { text: 'x', footnote: 'fp', size: 12 }] }], align: 'start', offset: 0, baseline: 0, footnotes: [{ id: 'fp', paras: [{ style: 'Footnote', runs: [{ text: 'Path note.' }] }] }] } as PathTextItem;
+    const o = layoutOptions(pub, []);
+    const g = pathTextLayout(item, o).glyphs;
+    const ref = g.find((x) => x.footnote === 'fp')!;
+    expect(ref.ch).toBe('1');
+    expect(item.text[0].runs[1].text).toBe('1');
+    expect(ref.size).toBeCloseTo(12 * 0.67, 3);
+    expect(ref.y).toBeLessThan(g[0].y - 2);
+    const notes = pathTextNotes(item, o);
+    expect(notes.lines.length).toBeGreaterThan(0);
+    expect(notes.h).toBeGreaterThan(0);
+    expect(notes.separator!.y).toBeGreaterThan(item.h);
+    expect(notes.lines[0].y).toBeGreaterThan(notes.separator!.y);
+    expect(notes.lines[0].footnoteId).toBe('fp');
+    expect(notes.lines[0].segs.map((s) => s.text).join('')).toContain('Path note.');
+    expect(pathTextNotes({ ...item, footnotes: undefined }, o).h).toBe(0);
+    pub.pages[0].items.push(item);
+    const svg = pageSvg(pub, pub.pages[0], { mode: 'export' });
+    expect(svg).toContain('qp-pathtext-notes');
+    expect(svg).toContain('>Path<');
+    expect(svg).toContain('>note.<');
+  });
+
+  it('hangs punctuation outside the margins with optical margin alignment', () => {
+    expect(hangFraction('“', 'left')).toBe(1);
+    expect(hangFraction(',', 'right')).toBe(1);
+    expect(hangFraction('-', 'right')).toBe(0.5);
+    expect(hangFraction('A', 'left')).toBeCloseTo(0.2, 6);
+    expect(hangFraction('m', 'left')).toBe(0);
+    const boxes = [{ frame: 'f', col: 0, x: 100, y: 0, w: 200, h: 1000, page: 0 }];
+    const lay = (opt: boolean, align: string, size = 12, ref = 12) => layoutStory(parasFromText('“Alpha beta,'), { boxes, resolve: () => ({ props: { align, ...(opt ? { opticalMargin: true } : {}) }, run: { size, font: 'Tinos' } }), resolveRun: (b: any, x: any) => ({ ...b, ...x }), opticalMarginSize: ref } as any);
+    const plain = lay(false, 'justAll').lines[0];
+    expect(plain.x).toBeCloseTo(100, 6);
+    expect(plain.width).toBeCloseTo(200, 6);
+    const hung = lay(true, 'justAll').lines[0];
+    const css = cssFont({ size: 12 } as any, 12, 'Tinos');
+    expect(hung.x).toBeCloseTo(100 - measure('“', css), 3);
+    expect(hung.x + hung.width).toBeCloseTo(300 + measure(',', css), 3);
+    expect(hung.hang![0]).toBeCloseTo(measure('“', css), 3);
+    expect(hung.hang![1]).toBeCloseTo(measure(',', css), 3);
+    // Right-aligned text ends past the margin by the comma's width; left-aligned starts before it.
+    const right = lay(true, 'r').lines[0];
+    expect(right.x + right.width).toBeCloseTo(300 + measure(',', css), 3);
+    const left = lay(true, 'l').lines[0];
+    expect(left.x).toBeCloseTo(100 - measure('“', css), 3);
+    // The reference size scales the overhang: 24pt text hangs half as much at a 12pt reference, and never more than the glyph.
+    const big = lay(true, 'l', 24, 12).lines[0];
+    const css24 = cssFont({ size: 24 } as any, 24, 'Tinos');
+    expect(big.hang![0]).toBeCloseTo(measure('“', css24) * 0.5, 3);
+    const small = lay(true, 'l', 6, 12).lines[0];
+    const css6 = cssFont({ size: 6 } as any, 6, 'Tinos');
+    expect(small.hang![0]).toBeCloseTo(measure('“', css6), 3);
+    // Story-level switch and the paragraph's own setting.
+    const pub = Pub.blank();
+    const f = pub.newTextFrame({ x: 36, y: 36, w: 300, h: 200 }, parasFromText('“Quoted words here.'));
+    pub.pages[0].items.push(f);
+    const s = pub.story(f.story)!;
+    const x0 = storyLayout(pub, s.id)!.r.lines[0].x;
+    s.opticalMargin = true; pub.changed();
+    const x1 = storyLayout(pub, s.id)!.r.lines[0].x;
+    expect(x1).toBeLessThan(x0);
+    s.paras[0].opticalMargin = false; pub.changed();
+    expect(storyLayout(pub, s.id)!.r.lines[0].x).toBeCloseTo(x0, 6);
+    // Drop caps and bullets are not hung.
+    const drop = layoutStory(parasFromText('“Alpha beta gamma delta epsilon zeta eta theta iota kappa'), { boxes, resolve: () => ({ props: { opticalMargin: true, dropCap: { lines: 2, chars: 1 } }, run: { size: 12, font: 'Tinos' } }), resolveRun: (b: any, x: any) => ({ ...b, ...x }) } as any).lines[0];
+    expect(drop.hang?.[0] ?? 0).toBe(0);
   });
 });

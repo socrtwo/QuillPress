@@ -448,8 +448,8 @@ export class Canvas {
     if (!hit) return;
     if (hit.kind === 'text') {
       // Double-clicking a note at the bottom of the column edits that footnote in place.
-      const noteEl = (e.target as Element | null)?.closest?.('text[data-fn]') as (SVGElement & { dataset: DOMStringMap }) | null;
-      if (noteEl?.dataset.fn && !this.app.prefs.touchMode && this.editFootnote(hit.id, noteEl.dataset.fn)) return;
+      const fn = this.app.prefs.touchMode ? undefined : this.noteAt(hit, this.pt(e));
+      if (fn && this.editFootnote(hit.id, fn)) return;
       this.editText(hit.id);
     }
     else if (hit.kind === 'pathText') this.app.exec('path.editText');
@@ -520,6 +520,18 @@ export class Canvas {
     return true;
   }
 
+  /** The footnote whose laid note lines (in the frame) contain a page point. */
+  private noteAt(frame: TextFrame, p: { x: number; y: number }): string | undefined {
+    const lay = storyLayout(this.app.pub, frame.story);
+    if (!lay) return undefined;
+    for (const l of lay.r.lines) {
+      if (!l.footnote || !l.footnoteId || lay.boxes[l.box]?.frame !== frame.id) continue;
+      const b = lay.boxes[l.box];
+      if (p.x >= b.x && p.x <= b.x + b.w && p.y >= l.y - l.height * 0.8 && p.y <= l.y + l.height * 0.2) return l.footnoteId;
+    }
+    return undefined;
+  }
+
   /** Hides the drawn lines of a footnote while its island is open. */
   private hideNoteLines(fnId: string): void {
     for (const t of this.pageHost.querySelectorAll<SVGElement>('text[data-fn]')) if (t.dataset.fn === fnId) t.style.visibility = 'hidden';
@@ -533,19 +545,21 @@ export class Canvas {
     ed.destroy();
     const pub = this.app.pub;
     const story = pub.story(ed.story.id);
+    // Paragraphs read back from the island may list run keys in another order: compare them key-sorted.
+    const canon = (v: unknown) => JSON.stringify(v, (_k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, (x as any)[k]])) : x));
     if (ed.footnote) {
       // Footnote island: write the note's paragraphs in one step.
       const fn = story?.footnotes?.find((f) => f.id === ed.footnote!.id);
       const next = paras.length ? paras : [{ style: (pub.data.footnoteOptions || DEFAULT_FOOTNOTE_OPTIONS).style, runs: [] }];
-      if (fn && JSON.stringify(next) !== JSON.stringify(fn.paras)) {
+      if (fn && canon(next) !== canon(fn.paras)) {
         const pages = pub.chainOf(story!.id).map((f) => pub.pageOfItem(f.id)?.id).filter(Boolean) as string[];
         pub.transact('Edit Footnote', () => { fn.paras = next; }, pages.length && !this.app.tab.masterTarget ? [...new Set(pages)] : undefined);
       } else { this.renderedKey = ''; this.render(); }
       this.app.refresh();
       return;
     }
-    const before = JSON.stringify(story?.paras || []);
-    if (story && JSON.stringify(paras) !== before) {
+    const before = canon(story?.paras || []);
+    if (story && canon(paras) !== before) {
       const frames = pub.chainOf(story.id);
       // Anchors and footnote references whose placeholder was deleted release their object or note.
       const refs = (ps: typeof paras, k: 'anchor' | 'footnote') => new Set(ps.flatMap((p) => p.runs.map((r) => r[k]).filter(Boolean) as string[]));

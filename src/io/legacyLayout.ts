@@ -1,10 +1,12 @@
 /**
- * Best-effort import of page layout files whose formats have no public specification: InDesign
- * binary (.indd), QuarkXPress (.qxp/.qxd/.qxt) and PageMaker (.pmd/.p65/.pm6/.pmt), plus the shared
- * helpers that Microsoft Publisher (src/io/mspub.ts) uses. Nothing here reads the layout itself:
- * the text is recovered from the bytes (UTF-16 or 8-bit runs in the encoding the format uses) and
- * placed in flowing frames, and every picture that survives in the file is placed on its own page.
- * The result is a starting point for re-laying the document out, and the warnings say so.
+ * Import of page layout files whose formats have no public specification: InDesign binary (.indd),
+ * QuarkXPress (.qxp/.qxd/.qxt) and PageMaker (.pmd/.p65/.pm6/.pmt), plus the shared helpers that
+ * Microsoft Publisher (src/io/mspub.ts) uses. QuarkXPress 3.1–4.1 and PageMaker 6–7 have layout
+ * readers (src/io/qxp, src/io/pagemaker) that this file dispatches to. Everything else, and any file
+ * those readers cannot handle, goes through the harvest: the text is recovered from the bytes
+ * (UTF-16 or 8-bit runs in the encoding the format uses) and placed in flowing frames, and every
+ * picture that survives in the file is placed on its own page. The result is a starting point for
+ * re-laying the document out, and the warnings say so.
  *
  * Written from observation of the formats and from the published [MS-CFB] specification; the
  * open-source readers of the Document Liberation Project were consulted as references only.
@@ -176,8 +178,26 @@ function bestRuns(candidates: string[][]): string[] {
   return best;
 }
 
-/** Reads what can be read from an .indd, .qxp or .pmd file. */
+/**
+ * Reads an .indd, .qxp or .pmd file. QuarkXPress 3.1–4.1 and PageMaker 6–7 files go to the layout
+ * readers in src/io/qxp and src/io/pagemaker; InDesign binaries and anything those readers cannot
+ * handle go to the text-and-pictures harvest below.
+ */
 export async function importLegacyLayout(data: Uint8Array, name: string, kind: Exclude<LegacyKind, 'pub'>): Promise<LegacyImport> {
+  if (kind === 'qxp') {
+    try { return await (await import('./qxp/index')).importQxp(data, name); } catch (e) { return harvestLayout(data, name, kind, (e as Error).message); }
+  }
+  if (kind === 'pmd') {
+    try { return await (await import('./pagemaker/index')).importPageMaker(data, name); } catch (e) { return harvestLayout(data, name, kind, (e as Error).message); }
+  }
+  return harvestLayout(data, name, kind);
+}
+
+/**
+ * The fallback for every legacy format: text runs and pictures recovered from the raw bytes, flowed
+ * into frames and placed on pages. `reason` says why the layout reader did not run (shown first).
+ */
+export async function harvestLayout(data: Uint8Array, name: string, kind: Exclude<LegacyKind, 'pub'>, reason?: string): Promise<LegacyImport> {
   const warnings: string[] = [];
   let runs: string[] = [];
   if (kind === 'indd') {
@@ -192,7 +212,9 @@ export async function importLegacyLayout(data: Uint8Array, name: string, kind: E
   const pics = await picturesFrom([data]);
   const label = LEGACY_LABELS[kind];
   const pub = await buildPublication(name, paras, pics, warnings);
-  if (!paras.length && !pics.length) throw new Error(`No readable text or pictures were found in this ${label}.`);
-  warnings.unshift(`${label}: QuillPress has no reader for this format's layout (it is not publicly documented). ${paras.length ? `The text (${paras.reduce((a, p) => a + p.runs[0].text.split(/\s+/).length, 0)} words) was recovered and flowed into frames` : 'No text was found'}; frames, styles and page geometry were not. Save the result as .qpp or ask the program that made the file for an IDML (InDesign), XPress Tags (QuarkXPress) or .sla export.`);
+  if (!paras.length && !pics.length) throw new Error(`No readable text or pictures were found in this ${label}.${reason ? ` ${reason}` : ''}`);
+  const why = kind === 'indd' ? 'QuillPress has no reader for this format\'s layout (it is not publicly documented).' : reason || 'The layout could not be read.';
+  const advice = kind === 'indd' ? 'an IDML export from InDesign' : kind === 'qxp' ? 'an XPress Tags export from QuarkXPress, or a 3.1–4.1 copy of the file' : 'a PageMaker 6–7 copy of the file';
+  warnings.unshift(`${label}: ${why} ${paras.length ? `The text (${paras.reduce((a, p) => a + p.runs[0].text.split(/\s+/).length, 0)} words) was recovered and flowed into frames` : 'No text was found'}; frames, styles and page geometry were not. Save the result as .qpp or ask for ${advice}.`);
   return { pub, warnings, textOnly: true };
 }

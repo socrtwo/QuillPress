@@ -1,13 +1,20 @@
 /**
- * Microsoft Publisher (.pub): an OLE2 compound file ([MS-CFB]) whose "Quill" stream holds the
- * publication's text as UTF-16 and whose "Contents" and "Escher" streams hold the layout and the
- * pictures as Office Art ([MS-ODRAW]) BLIP records. Publisher's own structures are not publicly
- * documented, so this reader recovers the text and the pictures and leaves the layout to be redone;
- * the warnings say what was and was not read.
+ * Microsoft Publisher (.pub): an OLE2 compound file ([MS-CFB]) whose "Contents" stream holds the
+ * layout, "Quill/QuillSub/CONTENTS" the text and "Escher/EscherStm" the Office Art drawing layer
+ * with the pictures in "Escher/EscherDelayStm". The layout reader (src/io/mspub/*) recovers pages,
+ * master pages, shapes, text boxes with their stories and chains, pictures, lines, groups and
+ * tables for Publisher 2002–2016 files, and as far as the format is described for 2000 and 97/98.
+ * When the layout cannot be read, the text and the pictures are harvested from the bytes and
+ * flowed onto blank pages instead; the warnings say which path was taken.
+ *
+ * Written from the published [MS-CFB] and [MS-ODRAW] specifications and from the format description
+ * of the Document Liberation Project's Publisher reader (no code shared).
  */
 import { openCfb, isCfb } from './cfb';
 import { utf16Runs, paragraphsFrom, picturesFrom, buildPublication, type LegacyImport } from './legacyLayout';
 import type { Paragraph } from '../model/types';
+import { openPubStreams, type PubStreams } from './mspub/cfbStreams';
+import { dibToBmp } from './mspub/escher';
 
 /** A compound file with Publisher's "Quill" text stream. */
 export function isMsPub(b: Uint8Array): boolean {
@@ -44,20 +51,6 @@ export function escherBlips(s: Uint8Array): { mime: string; data: Uint8Array }[]
   return out;
 }
 
-/** Wraps a device-independent bitmap (BITMAPINFOHEADER + pixels) in a BMP file header. */
-function dibToBmp(d: Uint8Array): Uint8Array {
-  const u32 = (o: number) => (d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | (d[o + 3] << 24)) >>> 0;
-  const hdr = u32(0), bits = d[14] | (d[15] << 8), used = u32(32);
-  const palette = bits <= 8 ? (used || 1 << bits) * 4 : u32(16) === 3 && hdr === 40 ? 12 : 0;
-  const offset = 14 + hdr + palette;
-  const out = new Uint8Array(14 + d.length);
-  out[0] = 0x42; out[1] = 0x4d;
-  const put = (o: number, v: number) => { out[o] = v & 255; out[o + 1] = (v >>> 8) & 255; out[o + 2] = (v >>> 16) & 255; out[o + 3] = (v >>> 24) & 255; };
-  put(2, out.length); put(10, offset);
-  out.set(d, 14);
-  return out;
-}
-
 /** Paragraphs of the Quill stream's text (UTF-16, returns end paragraphs). */
 export function quillText(quill: Uint8Array): Paragraph[] {
   const runs = utf16Runs(quill, 4);
@@ -65,11 +58,44 @@ export function quillText(quill: Uint8Array): Paragraph[] {
   return paragraphsFrom(runs, 0.45);
 }
 
-export async function importMsPub(data: Uint8Array, name: string): Promise<LegacyImport> {
+/** Reads the layout; throws when the file's version is unsupported or its structures are damaged. */
+async function readLayout(st: PubStreams, name: string): Promise<LegacyImport> {
+  if (st.version === 'unknown') throw new Error('unsupported version');
+  const { collectPub } = await import('./mspub/collect');
+  if (st.version === '2002') {
+    if (!st.contents || !st.escher) throw new Error('the Contents or Escher stream is missing');
+    const { parseContents } = await import('./mspub/contents');
+    const { parseQuill } = await import('./mspub/quill');
+    const { parseEscher, parseDelayStream } = await import('./mspub/escher');
+    const { buildLayout } = await import('./mspub/shapes');
+    const contents = parseContents(st.contents);
+    const quill = st.quill ? parseQuill(st.quill) : null;
+    const escher = parseEscher(st.escher);
+    const pictures = st.escherDelay ? parseDelayStream(st.escherDelay) : [];
+    if (!contents.pages.size) throw new Error('no pages');
+    const doc = buildLayout(contents, quill, escher, pictures, '2002–2016');
+    const r = collectPub(doc, name);
+    return { pub: r.pub, warnings: r.warnings, textOnly: false };
+  }
+  if (!st.contents) throw new Error('the Contents stream is missing');
+  const { parse2k } = await import('./mspub/pub2k');
+  const { parseQuill } = await import('./mspub/quill');
+  const quill = st.version === '2000' && st.quill ? parseQuill(st.quill) : null;
+  const doc = parse2k(st.contents, quill, st.version);
+  if (!doc.pages.length) throw new Error('no pages');
+  const r = collectPub(doc, name);
+  r.warnings.push(st.version === '2000'
+    ? 'Publisher 2000 files describe fewer properties than later versions: fills are solid colors, pictures are metafiles (not placed), and no master pages are applied beyond the background page.'
+    : 'Publisher 97/98 files were read as far as the format is known: shapes, solid fills, outlines and plain text with bold, italic, underline, size and color.');
+  return { pub: r.pub, warnings: r.warnings, textOnly: false };
+}
+
+/** The previous reader: text and pictures harvested from the bytes and flowed onto new pages. */
+async function harvest(data: Uint8Array, name: string, why: string | null): Promise<LegacyImport> {
   const warnings: string[] = [];
   const cfb = openCfb(data);
   if (!cfb) throw new Error('Not a Publisher file (the compound file could not be read).');
-  const quill = cfb.read('Quill') || cfb.entries.filter((e) => /^quill$/i.test(e.name)).map((e) => cfb.read(e))[0];
+  const quill = cfb.read('Quill/QuillSub/CONTENTS') || cfb.read('Quill') || cfb.entries.filter((e) => /^(quill|contents)$/i.test(e.name) && /quill/i.test(e.path)).map((e) => cfb.read(e))[0];
   const paras = quill ? quillText(quill) : [];
   const pics: { mime: string; data: Uint8Array }[] = [];
   const seen = new Set<string>();
@@ -84,6 +110,22 @@ export async function importMsPub(data: Uint8Array, name: string): Promise<Legac
   if (!paras.length && !pics.length) throw new Error('No readable text or pictures were found in this Publisher file.');
   const pub = await buildPublication(name, paras, pics, warnings);
   if (cfb.damaged.length) warnings.push(`Parts of the compound file were damaged (${cfb.damaged.slice(0, 3).join(', ')}); what could be read was used.`);
-  warnings.unshift(`Microsoft Publisher: the text (${paras.reduce((a, p) => a + p.runs[0].text.split(/\s+/).length, 0)} words${quill ? ', from the Quill stream' : ''}) and ${pics.length} picture${pics.length === 1 ? '' : 's'} were recovered and placed on new pages. Publisher's page layout, frames and styles are not publicly documented and were not read; redo the layout here or save the result as .qpp.`);
+  warnings.unshift(`Microsoft Publisher: the text (${paras.reduce((a, p) => a + p.runs[0].text.split(/\s+/).length, 0)} words${quill ? ', from the Quill stream' : ''}) and ${pics.length} picture${pics.length === 1 ? '' : 's'} were recovered and placed on new pages${why ? ` because the layout could not be read (${why})` : ''}; redo the layout here or save the result as .qpp.`);
   return { pub, warnings, textOnly: true };
+}
+
+export async function importMsPub(data: Uint8Array, name: string): Promise<LegacyImport> {
+  const st = openPubStreams(data);
+  if (!st) throw new Error('Not a Publisher file (the compound file could not be read).');
+  let why: string | null = null;
+  if (st.version !== 'unknown') {
+    try {
+      const r = await readLayout(st, name);
+      if (st.cfb.damaged.length) r.warnings.push(`Parts of the compound file were damaged (${st.cfb.damaged.slice(0, 3).join(', ')}); what could be read was used.`);
+      return r;
+    } catch (e) {
+      why = (e as Error)?.message || String(e);
+    }
+  } else why = st.contents ? 'unrecognized Publisher version' : 'the Contents stream is missing';
+  return harvest(data, name, why);
 }

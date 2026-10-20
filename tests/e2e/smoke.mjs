@@ -60,6 +60,36 @@ try {
   check('footnote stored', await p.evaluate(() => { const s = qp.pub.story(qp.page.items[0].story); return [s.footnotes.length, s.paras[0].runs.at(-1).footnote === s.footnotes[0].id, s.paras[0].runs.at(-1).text]; }), [1, true, '1']);
   check('footnote drawn', await p.evaluate(() => { const g = document.querySelector(`.qp-page-host [data-id="${qp.page.items[0].id}"]`); const spans = [...g.querySelectorAll('tspan')].map((t) => t.textContent); return [spans.includes('1'), g.textContent.includes('Source'), !!g.querySelector('.qp-fn-sep')]; }), [true, true, true]);
 
+  // Double-clicking the note at the bottom of the column edits it in place; Escape commits and returns to the reference.
+  const noteBox = await p.evaluate(() => { const r = document.querySelector('.qp-page-host text[data-fn]').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+  await p.mouse.dblclick(noteBox[0], noteBox[1]);
+  await p.waitForTimeout(200);
+  check('footnote island', await p.evaluate(() => [!!document.querySelector('.qp-textedit.qp-fnedit'), (document.querySelector('.qp-textedit.qp-fnedit .qp-fnlabel')?.textContent || '').trim(), document.querySelector('.qp-page-host text[data-fn]').style.visibility]), [true, '1', 'hidden']);
+  await p.keyboard.press('End');
+  await p.keyboard.type(' added');
+  await p.keyboard.press('Escape');
+  await p.waitForTimeout(250);
+  check('footnote edited in place', await p.evaluate(() => { const s = qp.pub.story(qp.page.items[0].story); return [s.footnotes[0].paras.map((x) => x.runs.map((r) => r.text).join('')).join('|'), !!document.querySelector('.qp-textedit:not(.qp-fnedit)'), !document.querySelector('.qp-fnedit')]; }), ['Source added', true, true]);
+  await p.keyboard.press('Escape');
+  await p.waitForTimeout(200);
+  check('edited note drawn', await p.evaluate(() => [!document.querySelector('.qp-textedit'), document.querySelector('.qp-page-host [data-id]').textContent.includes('added')]), [true, true]);
+  await p.evaluate(() => qp.exec('edit.undo'));
+  check('footnote edit undone', await p.evaluate(() => qp.pub.story(qp.page.items[0].story).footnotes[0].paras[0].runs.map((r) => r.text).join('')), 'Source');
+  await p.evaluate(() => qp.exec('edit.redo'));
+  check('footnote edit redone', await p.evaluate(() => qp.pub.story(qp.page.items[0].story).footnotes[0].paras[0].runs.map((r) => r.text).join('')), 'Source added');
+
+  // Optical margin alignment moves a justified line that starts with a quotation mark left of the margin.
+  await p.evaluate(() => qp.exec('insert.textFrame', '“Quoted opening words that run on long enough to wrap onto a second line of the frame, and more,'));
+  await p.waitForTimeout(150);
+  const omId = await p.evaluate(() => qp.page.items.at(-1).id);
+  const xBefore = await p.evaluate((id) => +document.querySelector(`.qp-page-host [data-id="${id}"] text tspan`).getAttribute('x'), omId);
+  await p.evaluate((id) => { qp.tab.ui.select([id]); qp.exec('fmt.justify'); qp.exec('fmt.opticalMargin'); }, omId);
+  await p.waitForTimeout(200);
+  const xAfter = await p.evaluate((id) => +document.querySelector(`.qp-page-host [data-id="${id}"] text tspan`).getAttribute('x'), omId);
+  check('optical margin', [xAfter < xBefore - 1, await p.evaluate((id) => qp.pub.story(qp.page.items.find((e) => e.id === id).story).paras[0].opticalMargin, omId)], [true, true]);
+  await p.evaluate((id) => { qp.tab.ui.select([id]); qp.exec('edit.delete'); qp.tab.ui.select([]); }, omId);
+  check('optical frame removed', await p.evaluate((id) => qp.page.items.some((e) => e.id === id), omId), false);
+
   // Text on a path draws rotated glyphs.
   await p.evaluate(() => qp.exec('insert.textOnPath', { preset: 'arcUp', text: 'Curved words' }));
   await p.waitForTimeout(150);

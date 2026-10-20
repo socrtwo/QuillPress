@@ -7,20 +7,29 @@ import { pageSvg } from '../render/page';
 import { escHtml } from '../util/sanitize';
 import { embeddedFontCss } from './images';
 import { textOf } from '../model/pub';
-import type { Story } from '../model/types';
+import type { Story, Footnote, Paragraph } from '../model/types';
 import { pathTextString } from '../render/pathText';
 
-/** Footnotes of a story as "label text" lines, in reference order. */
-function footnoteLines(s: Story): string[] {
-  if (!s.footnotes?.length) return [];
-  const order = s.paras.flatMap((p) => p.runs.filter((r) => r.footnote).map((r) => ({ id: r.footnote!, label: r.text })));
-  return order.map((o) => { const fn = s.footnotes!.find((f) => f.id === o.id); return fn ? `${o.label} ${textOf(fn.paras)}` : ''; }).filter(Boolean);
+/** Footnotes as "label text" lines, in reference order (stories, table cells, path text alike). */
+function noteLines(paras: Paragraph[], notes: Footnote[] | undefined): string[] {
+  if (!notes?.length) return [];
+  const order = paras.flatMap((p) => p.runs.filter((r) => r.footnote).map((r) => ({ id: r.footnote!, label: r.text })));
+  return order.map((o) => { const fn = notes.find((f) => f.id === o.id); return fn ? `${o.label} ${textOf(fn.paras)}` : ''; }).filter(Boolean);
 }
+function footnoteLines(s: Story): string[] { return noteLines(s.paras, s.footnotes); }
 
-/** Text set on paths, page by page. */
+/** Text set on paths, page by page, each followed by its footnotes. */
 function pathTexts(pub: Pub): string[] {
   const out: string[] = [];
-  const walk = (items: any[]) => { for (const e of items) { if (e.kind === 'pathText') { const t = pathTextString(e).trim(); if (t) out.push(t); } else if (e.kind === 'group') walk(e.children); } };
+  const walk = (items: any[]) => { for (const e of items) { if (e.kind === 'pathText') { const t = pathTextString(e).trim(); if (t) out.push(t); out.push(...noteLines(e.text, e.footnotes)); } else if (e.kind === 'group') walk(e.children); } };
+  for (const p of pub.pages) walk(p.items);
+  return out;
+}
+
+/** Footnotes of the tables, page by page. */
+function tableNotes(pub: Pub): string[] {
+  const out: string[] = [];
+  const walk = (items: any[]) => { for (const e of items) { if (e.kind === 'table' && e.footnotes?.length) out.push(...noteLines(e.rows.flatMap((r: any) => r.cells.flatMap((c: any) => c.text)), e.footnotes)); else if (e.kind === 'group') walk(e.children); } };
   for (const p of pub.pages) walk(p.items);
   return out;
 }
@@ -34,7 +43,7 @@ export async function pubToHtml(pub: Pub, opts: HtmlOptions = {}): Promise<strin
     const svg = pageSvg(pub, p, { mode: 'export' }).replace(/ width="[^"]*" height="[^"]*"/, '');
     return `<section class="page" id="page-${i + 1}" aria-label="Page ${escHtml(pub.pageLabel(i) || String(i + 1))}">${svg}</section>`;
   });
-  const stories = pub.data.stories.map((s) => `<article>${s.paras.map((p) => `<p class="${escHtml((p.style || 'Body').replace(/\s+/g, '-').toLowerCase())}">${escHtml(textOf([p]))}</p>`).join('')}${footnoteLines(s).length ? `<footer class="footnotes">${footnoteLines(s).map((l) => `<p class="footnote">${escHtml(l)}</p>`).join('')}</footer>` : ''}</article>`).join('') + (pathTexts(pub).length ? `<aside>${pathTexts(pub).map((t) => `<p class="path-text">${escHtml(t)}</p>`).join('')}</aside>` : '');
+  const stories = pub.data.stories.map((s) => `<article>${s.paras.map((p) => `<p class="${escHtml((p.style || 'Body').replace(/\s+/g, '-').toLowerCase())}">${escHtml(textOf([p]))}</p>`).join('')}${footnoteLines(s).length ? `<footer class="footnotes">${footnoteLines(s).map((l) => `<p class="footnote">${escHtml(l)}</p>`).join('')}</footer>` : ''}</article>`).join('') + (pathTexts(pub).length ? `<aside>${pathTexts(pub).map((t) => `<p class="path-text">${escHtml(t)}</p>`).join('')}</aside>` : '') + (tableNotes(pub).length ? `<footer class="footnotes">${tableNotes(pub).map((l) => `<p class="footnote">${escHtml(l)}</p>`).join('')}</footer>` : '');
   const nav = pub.pages.map((_, i) => `<a href="#page-${i + 1}">${escHtml(pub.pageLabel(i) || String(i + 1))}</a>`).join(' ');
   return `<!doctype html>
 <html lang="${escHtml(pub.data.props.language || 'en')}">
@@ -93,5 +102,7 @@ export function pubToText(pub: Pub, markdown = false): string {
   }
   const paths = pathTexts(pub);
   if (paths.length) { out.push(...paths); out.push(''); }
+  const tn = tableNotes(pub);
+  if (tn.length) { out.push(...tn); out.push(''); }
   return out.join('\n');
 }

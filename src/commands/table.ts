@@ -8,7 +8,19 @@ import { colorHex } from '../model/styles';
 import { selection, edit, insertItem, placeNew } from '../edit/ops';
 import { paraText } from '../edit/textEdit';
 import { makeTable } from './insert';
+import { notesMarkup, parseNotesMarkup, pruneNotes } from './notes';
+import { DEFAULT_FOOTNOTE_OPTIONS } from '../model/types';
 import { openDialog, toast, colorMenu, confirmDialog } from '../ui/dialog';
+
+/** A cell's paragraphs as text, " ⏎ " between paragraphs, footnote references as `[^note text]`. */
+const cellMarkup = (t: TableItem, cell: TableCell) => notesMarkup(cell.text, t.footnotes).join(' ⏎ ');
+/** Paragraphs from a cell's edited text (markers become references; new notes join the table's). */
+function cellParas(app: App, t: TableItem, cell: TableCell | undefined, lines: string[], style: string): Paragraph[] {
+  const notes = (t.footnotes ||= []);
+  const fnStyle = (app.pub.data.footnoteOptions || DEFAULT_FOOTNOTE_OPTIONS).style;
+  const keepOf = (i: number) => { const fmt = cell?.text[i]?.runs.find((r) => !r.br && !r.footnote && !r.anchor) || cell?.text[0]?.runs.find((r) => !r.br && !r.footnote && !r.anchor); const { text: _t, br: _b, footnote: _f, anchor: _a, ...keep } = (fmt || {}) as any; return keep; };
+  return parseNotesMarkup(lines, cell?.text || [], notes, style, fnStyle, keepOf);
+}
 
 const u = (app: App) => UNITS[app.prefs.unit];
 const toU = (app: App, pt: number) => +(pt / u(app).pt).toFixed(u(app).digits);
@@ -138,8 +150,8 @@ def([
     run: async (app) => {
       const t = table(app); if (!t) return;
       const cur = cursor(app, t);
-      const text = t.rows.map((r) => r.cells.map((c) => c.text.map(paraText).join(' ⏎ ')).join('\t')).join('\n');
-      const r = await openDialog({ title: 'Edit Table', wide: true, fields: [{ key: 't', label: 'Cells (rows on lines, cells separated by tabs; " ⏎ " separates paragraphs inside a cell)', type: 'textarea', rows: Math.min(20, t.rows.length + 3), value: text }, { key: 'row', label: 'Current row', type: 'number', min: 1, max: t.rows.length, value: cur.r + 1, half: true }, { key: 'col', label: 'Current column', type: 'number', min: 1, max: t.cols.length, value: cur.c + 1, half: true }] });
+      const text = t.rows.map((r) => r.cells.map((c) => cellMarkup(t, c)).join('\t')).join('\n');
+      const r = await openDialog({ title: 'Edit Table', wide: true, fields: [{ key: 't', label: 'Cells (rows on lines, cells separated by tabs; " ⏎ " separates paragraphs inside a cell)', type: 'textarea', rows: Math.min(20, t.rows.length + 3), value: text }, { key: 'row', label: 'Current row', type: 'number', min: 1, max: t.rows.length, value: cur.r + 1, half: true }, { key: 'col', label: 'Current column', type: 'number', min: 1, max: t.cols.length, value: cur.c + 1, half: true }], help: 'A footnote is written as [^note text] where its reference goes; the notes are set under the table.' });
       if (!r) return;
       (app as any).tableCursor = { id: t.id, r: Math.max(0, +r.row - 1), c: Math.max(0, +r.col - 1) };
       if (r.t === text) return;
@@ -150,8 +162,9 @@ def([
         x.rows = lines.map((l, ri) => {
           const old = x.rows[ri];
           const cells = l.split('\t');
-          return { h: old?.h || x.rows[x.rows.length - 1]?.h || 22, header: old?.header, cells: x.cols.map((_, ci) => { const o = old?.cells[ci]; const txt = cells[ci] ?? ''; if (o && o.text.map(paraText).join(' ⏎ ') === txt) return o; const style = o?.text[0]?.style || (ri === 0 && x.style?.firstRow ? 'Table Header' : 'Table Text'); const fmt = o?.text[0]?.runs[0]; const { text: _t, ...keep } = (fmt || {}) as any; return { ...(o || {}), text: txt.split(' ⏎ ').map((p) => ({ style, runs: p ? [{ ...keep, text: p }] : [] })) }; }) };
+          return { h: old?.h || x.rows[x.rows.length - 1]?.h || 22, header: old?.header, cells: x.cols.map((_, ci) => { const o = old?.cells[ci]; const txt = cells[ci] ?? ''; if (o && cellMarkup(x, o) === txt) return o; const style = o?.text[0]?.style || (ri === 0 && x.style?.firstRow ? 'Table Header' : 'Table Text'); return { ...(o || {}), text: cellParas(app, x, o, txt.split(' ⏎ '), style) }; }) };
         });
+        pruneNotes({ kind: 'table', item: x });
       });
     },
   },
@@ -162,9 +175,10 @@ def([
       const { r, c } = at || cursor(app, t);
       (app as any).tableCursor = { id: t.id, r, c };
       const cl = t.rows[r]?.cells[c]; if (!cl) return;
-      const res = await openDialog({ title: `Cell ${r + 1},${c + 1}`, fields: [{ key: 't', label: 'Text (one paragraph per line)', type: 'textarea', rows: 4, value: cl.text.map(paraText).join('\n'), autofocus: true }] });
-      if (!res) return;
-      patch(app, 'Edit Cell', () => { const style = cl.text[0]?.style || 'Table Text'; const fmt = cl.text[0]?.runs[0]; const { text: _t, ...keep } = (fmt || {}) as any; cl.text = String(res.t).split('\n').map((p) => ({ style, runs: p ? [{ ...keep, text: p }] : [] })); });
+      const before = notesMarkup(cl.text, t.footnotes).join('\n');
+      const res = await openDialog({ title: `Cell ${r + 1},${c + 1}`, fields: [{ key: 't', label: 'Text (one paragraph per line)', type: 'textarea', rows: 4, value: before, autofocus: true }], help: 'Write [^note text] where a footnote reference goes.' });
+      if (!res || res.t === before) return;
+      patch(app, 'Edit Cell', () => { const style = cl.text[0]?.style || 'Table Text'; cl.text = cellParas(app, t, cl, String(res.t).replace(/\r\n?/g, '\n').split('\n'), style); pruneNotes({ kind: 'table', item: t }); });
     },
   },
   {

@@ -12,6 +12,9 @@ import { parseDraft, parseJsonLoose, linesOf } from '../../src/ai/press';
 import { Pub, parasFromText } from '../../src/model/pub';
 import { spellTargets, wordsIn, replaceInParagraph, dialectFor, SpellSession, type SpellChecker } from '../../src/proof/proofing';
 import { storyLayout, layoutOptions } from '../../src/render/flow';
+import { tableLayout } from '../../src/render/table';
+import { notesMarkup, parseNotesMarkup } from '../../src/commands/notes';
+import { pubToText } from '../../src/export/html';
 import { pathTextGlyphs } from '../../src/render/pathText';
 import { pageSvg } from '../../src/render/page';
 
@@ -233,5 +236,117 @@ describe('anchored objects, footnotes and text on a path commands', () => {
     expect(from.kind).toBe('pathText');
     expect(from.w).toBe(100);
     expect(pathTextGlyphs(from, layoutOptions(pub, [])).length).toBe('Alongtheoval'.length);
+  });
+});
+
+describe('footnotes in tables and path text, optical margins (commands)', () => {
+  it('registers the new ids in the Typography group', () => {
+    for (const id of ['fmt.opticalMargin', 'text.opticalMarginStory', 'text.opticalMarginSize']) { expect(getCommand(id), id).toBeTruthy(); expect(getCommand(id)!.group).toBe('Typography'); }
+    const typo = DEFAULT_TABS.find((t) => t.id === 'text')!.groups.find((g) => g.id === 'typography')!;
+    for (const id of ['fmt.opticalMargin', 'text.opticalMarginStory', 'text.opticalMarginSize']) expect(typo.items).toContain(id);
+  });
+
+  it('toggles optical margins on paragraphs, stories and sets the reference size', () => {
+    const app = fakeApp();
+    const pub: Pub = app.pub;
+    const f = pub.newTextFrame({ x: 36, y: 36, w: 300, h: 200 }, parasFromText('“Quoted words here.\nSecond paragraph.'));
+    pub.pages[0].items.push(f);
+    const s = pub.story(f.story)!;
+    app.tab.ui.select([f.id]);
+    const x0 = storyLayout(pub, s.id)!.r.lines[0].x;
+    app.exec('fmt.opticalMargin');
+    expect(s.paras.every((p) => p.opticalMargin === true)).toBe(true);
+    expect(getCommand('fmt.opticalMargin')!.isActive!(app)).toBe(true);
+    expect(storyLayout(pub, s.id)!.r.lines[0].x).toBeLessThan(x0);
+    app.exec('fmt.opticalMargin');
+    expect(s.paras.some((p) => p.opticalMargin)).toBe(false);
+    app.exec('text.opticalMarginStory');
+    expect(s.opticalMargin).toBe(true);
+    expect(getCommand('text.opticalMarginStory')!.isActive!(app)).toBe(true);
+    expect(storyLayout(pub, s.id)!.r.lines[0].x).toBeLessThan(x0);
+    app.exec('text.opticalMarginSize', 24);
+    expect(pub.data.opticalMarginSize).toBe(24);
+    pub.undo(); pub.undo();
+    expect(pub.data.opticalMarginSize).toBeUndefined();
+    expect(pub.story(f.story)!.opticalMargin).toBeUndefined();
+  });
+
+  it('inserts, lists, edits, deletes and converts footnotes in tables', () => {
+    const app = fakeApp();
+    const pub: Pub = app.pub;
+    app.exec('insert.table', { rows: 2, cols: 2 });
+    const t = pub.pages[0].items[0] as any;
+    expect(t.kind).toBe('table');
+    app.tab.ui.select([t.id]);
+    app.tableCursor = { id: t.id, r: 1, c: 0 };
+    const id = app.exec('text.insertFootnote', 'A table note');
+    void id;
+    expect(t.footnotes.length).toBe(1);
+    const ref = t.rows[1].cells[0].text.at(-1).runs.find((r: any) => r.footnote);
+    expect(ref.footnote).toBe(t.footnotes[0].id);
+    expect(tableLayout(pub, t, 0).labels[t.footnotes[0].id]).toBe('1');
+    // Markers in the cell editors: an existing note shows as [^text]; a new marker makes a note; a removed marker drops it.
+    expect(notesMarkup(t.rows[1].cells[0].text, t.footnotes).join(' ⏎ ')).toContain('[^A table note]');
+    pub.transact('Edit', () => { t.rows[0].cells[0].text = parseNotesMarkup(['Head[^Second note]'], t.rows[0].cells[0].text, t.footnotes, 'Table Text', 'Footnote', () => ({})); });
+    expect(t.footnotes.length).toBe(2);
+    expect(t.rows[0].cells[0].text[0].runs.map((r: any) => r.text).join('')).toBe('Head1');
+    const tl = tableLayout(pub, t, 0);
+    expect(tl.order.length).toBe(2);
+    expect(tl.labels[t.footnotes[1].id]).toBe('1');
+    expect(tl.labels[t.footnotes[0].id]).toBe('2');
+    expect(t.rows[1].cells[0].text.at(-1).runs.find((r: any) => r.footnote).text).toBe('2');
+    // Export and spelling see the notes.
+    expect(pubToText(pub)).toContain('A table note');
+    expect(spellTargets(pub.data).some((x) => x.para === t.footnotes[0].paras[0])).toBe(true);
+    // The pane and the delete command handle table notes.
+    const pane = PANES.footnotes;
+    const el = document.createElement('div');
+    pane.render(app, el, {});
+    expect(el.textContent).toContain('Table');
+    expect(el.querySelectorAll('textarea').length).toBe(2);
+    app.exec('text.deleteFootnote', t.footnotes[1].id);
+    expect(t.footnotes.length).toBe(1);
+    expect(t.rows[0].cells[0].text[0].runs.some((r: any) => r.footnote)).toBe(false);
+    // Endnotes go to the first text frame on the page.
+    const f = pub.newTextFrame({ x: 36, y: 400, w: 300, h: 100 }, parasFromText('Body text.'));
+    pub.pages[0].items.push(f);
+    app.exec('text.footnotesToEndnotes');
+    expect(t.footnotes).toBeUndefined();
+    const s = pub.story(f.story)!;
+    expect(s.paras.map((p) => p.runs.map((r) => r.text).join(''))).toEqual(['Body text.', 'Notes', '1 A table note']);
+    expect(t.rows[1].cells[0].text.at(-1).runs.at(-1).link).toMatch(/^#fn-/);
+    pub.undo();
+    expect((pub.pages[0].items[0] as any).footnotes.length).toBe(1);
+    expect(pub.story(f.story)!.paras.length).toBe(1);
+  });
+
+  it('inserts and edits footnotes in text on a path through markers', () => {
+    const app = fakeApp();
+    const pub: Pub = app.pub;
+    app.exec('insert.textOnPath', { preset: 'line', text: 'Along the line' });
+    const pt = pub.pages[0].items[0] as any;
+    app.tab.ui.select([pt.id]);
+    app.exec('text.insertFootnote', 'Path note');
+    expect(pt.footnotes.length).toBe(1);
+    expect(pt.text[0].runs.at(-1).footnote).toBe(pt.footnotes[0].id);
+    const glyphs = pathTextGlyphs(pt, layoutOptions(pub, []));
+    expect(glyphs.at(-1)!.footnote).toBe(pt.footnotes[0].id);
+    expect(glyphs.at(-1)!.ch).toBe('1');
+    app.exec('path.editText', 'Along the line[^Path note] and on[^Another]');
+    expect(pt.footnotes.length).toBe(2);
+    expect(pt.footnotes[0].paras[0].runs[0].text).toBe('Path note');
+    expect(pt.text[0].runs.filter((r: any) => r.footnote).length).toBe(2);
+    expect(pathTextGlyphs(pt, layoutOptions(pub, [])).filter((g) => g.footnote).map((g) => g.ch)).toEqual(['1', '2']);
+    expect(pageSvg(pub, pub.pages[0], { mode: 'export' })).toContain('qp-pathtext-notes');
+    expect(pubToText(pub)).toContain('Another');
+    app.exec('path.editText', 'Plain again');
+    expect(pt.footnotes).toBeUndefined();
+    // No text frame on the page: endnotes make a new frame under the item.
+    app.exec('path.editText', 'Words[^Note to move]');
+    app.exec('text.footnotesToEndnotes');
+    const f = pub.pages[0].items.find((e) => e.kind === 'text') as any;
+    expect(f).toBeTruthy();
+    expect(pub.story(f.story)!.paras.map((p) => p.runs.map((r) => r.text).join(''))).toEqual(['Notes', '1 Note to move']);
+    expect(pt.footnotes).toBeUndefined();
   });
 });
