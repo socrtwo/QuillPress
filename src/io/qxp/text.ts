@@ -98,6 +98,37 @@ export function paraProps(f: ParaFormat | undefined): ParaProps {
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
 
+/** The part of a story between two character offsets, with its spans clipped and shifted. */
+export function textRange(s: QxpText, from: number, to: number): QxpText {
+  const a = Math.max(0, Math.min(from, s.text.length)), b = Math.max(a, Math.min(to, s.text.length));
+  const clip = <T>(spans: Span<T>[]): Span<T>[] => {
+    const out: Span<T>[] = [];
+    for (const sp of spans) {
+      const x = Math.max(a, sp.start), y = Math.min(b, sp.start + sp.length);
+      if (x < y) out.push({ format: sp.format, start: x - a, length: y - x });
+    }
+    return out;
+  };
+  return { text: s.text.slice(a, b), chars: clip(s.chars), paras: clip(s.paras) };
+}
+
+/** The story without the given character ranges (the parts that other objects of its chain show). */
+export function textWithout(s: QxpText, ranges: [number, number][]): QxpText {
+  const sorted = [...ranges].sort((x, y) => x[0] - y[0]);
+  const parts: QxpText[] = [];
+  let pos = 0;
+  for (const [a, b] of sorted) { if (a > pos) parts.push(textRange(s, pos, a)); pos = Math.max(pos, b); }
+  if (pos < s.text.length) parts.push(textRange(s, pos, s.text.length));
+  const out: QxpText = { text: '', chars: [], paras: [] };
+  for (const p of parts) {
+    const shift = out.text.length;
+    out.text += p.text;
+    for (const c of p.chars) out.chars.push({ ...c, start: c.start + shift });
+    for (const c of p.paras) out.paras.push({ ...c, start: c.start + shift });
+  }
+  return out;
+}
+
 /** The story's paragraphs with their runs; empty stories give one empty paragraph. */
 export function storyParagraphs(s: QxpText, style = 'Body'): Paragraph[] {
   const text = s.text;

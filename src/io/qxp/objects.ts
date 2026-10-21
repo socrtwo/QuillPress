@@ -17,7 +17,7 @@ export interface Gradient { kind: 'linear' | 'midLinear' | 'rectangular' | 'diam
 export interface Frame { width: number; color: string; gapColor?: string; dash?: LineStyle; /** 0 none, 1 end, 2 start, 3/4 both (mixed), 5 both. */ arrow: number }
 export interface TextSettings { gutter: number; insets: { top: number; left: number; right: number; bottom: number }; columns: number; vAlign: 't' | 'ctr' | 'b' | 'just'; rotation: number; skew: number }
 export interface LinkSettings { linkId: number; offsetIntoText: number; nextLinkedIndex: number; contentIndex: number }
-export interface PictureSettings { rotation: number; skew: number; offsetLeft: number; offsetTop: number; scaleH: number; scaleV: number; data?: Uint8Array }
+export interface PictureSettings { rotation: number; skew: number; offsetLeft: number; offsetTop: number; scaleH: number; scaleV: number; data?: Uint8Array; /** Path of the linked picture file, when the file records it. */ file?: string }
 export interface CurveComponent { bbox: Rect; points: Pt[] }
 
 export interface QxpObject {
@@ -49,6 +49,10 @@ export interface QxpPage {
   offsets: Rect[];
   objects: QxpObject[];
   master: boolean;
+  /** The page's name as stored (master pages carry their names here). */
+  name: string;
+  /** Set when an object of the page could not be read; the objects before it are kept. */
+  error?: string;
 }
 
 class ObjectError extends Error {}
@@ -60,10 +64,12 @@ export function readPages(r: Reader, header: QxpHeader, tables: QxpTables, warni
   const total = header.pagesCount + header.masterPagesCount;
   for (let i = 0; i < total; i++) {
     const master = i < header.masterPagesCount;
-    try {
-      pages.push(p.readPage(master));
-    } catch (e) {
-      warnings.push(`Page ${i - header.masterPagesCount + 1} of ${header.pagesCount} could not be read (${(e as Error).message}); the pages after it were not recovered.`);
+    const page = p.readPage(master);
+    if (page) pages.push(page);
+    if (!page || page.error) {
+      const n = i - header.masterPagesCount + 1;
+      const where = page ? `after ${page.objects.length} of its objects` : 'at its start';
+      warnings.push(`${master ? `Master page ${i + 1}` : `Page ${n} of ${header.pagesCount}`} could not be read in full (${(page?.error ?? 'the page record is damaged')} ${where}); ${n < header.pagesCount ? 'the pages after it were not recovered' : 'what was read is kept'}.`);
       break;
     }
   }
@@ -75,6 +81,7 @@ class PageReader {
   private readonly be: boolean;
   private deob: Deobfuscator;
   private grouped = new Set<number>();
+  private lastName = '';
 
   constructor(private r: Reader, private header: QxpHeader, private t: QxpTables) {
     this.v4 = t.v4;
@@ -82,19 +89,24 @@ class PageReader {
     this.deob = new Deobfuscator(header.seed, header.increment);
   }
 
-  readPage(master: boolean): QxpPage {
-    const offsets = this.readPageSettings();
-    const raw = this.r.u32();
-    const count = this.v4 ? this.deob.value(raw & 0xffff) : raw;
-    if (count > 100000) throw new ObjectError('object count is not plausible');
+  /** The next page; null when its settings cannot be read, a page with `error` set when an object cannot. */
+  readPage(master: boolean): QxpPage | null {
+    let offsets: Rect[];
+    let count: number;
+    try {
+      offsets = this.readPageSettings();
+      const raw = this.r.u32();
+      count = this.v4 ? this.deob.value(raw & 0xffff) : raw;
+      if (count > 100000) throw new ObjectError('object count is not plausible');
+    } catch { return null; }
     if (this.v4) this.deob.nextRev();
     const objects: QxpObject[] = [];
+    const page: QxpPage = { offsets, objects, master, name: this.lastName };
     this.grouped.clear();
     for (let i = 0; i < count; i++) {
-      const o = this.readObject(count, i);
-      objects.push(o);
+      try { objects.push(this.readObject(count, i)); } catch (e) { page.error = (e as Error).message; break; }
     }
-    return { offsets, objects, master };
+    return page;
   }
 
   private readPageSettings(): Rect[] {
@@ -113,7 +125,11 @@ class PageReader {
     for (let i = 0; i <= count; i++) { const len = r.u32(); r.skip(len + 4); }
     if (!this.be) r.skip(4);
     const nameLen = r.u32();
-    r.skip(nameLen);
+    if (nameLen > r.remaining) throw new ObjectError('page name runs past the end');
+    const nameBytes = r.bytes(nameLen);
+    let name = '';
+    for (const c of nameBytes) { if (c === 0) break; if (c >= 32) name += String.fromCharCode(c); }
+    this.lastName = name.trim();
     return out;
   }
 
@@ -256,23 +272,25 @@ class PageReader {
       const frame = this.frame();
       r.skip(4);
       let runaroundId = 0, clipId = 0;
-      if (this.header.version === QXP_33) {
-        runaroundId = r.u32();
+      // 3.1 and 3.3 picture boxes have the same 92-byte body: the ids of the runaround and
+      // clipping paths, then the picture settings. 3.1 keeps the corner radius of cornered boxes
+      // where 3.3 has the clipping id (3.3 stores the radius in the object header instead).
+      runaroundId = r.u32();
+      if (this.header.version < QXP_33 && (shape === 'roundRect' || shape === 'beveledRect' || shape === 'concaveRect')) {
+        o.cornerRadius = r.fraction();
+        r.skip(16);
+      } else {
         r.skip(2);
         clipId = r.u32();
         r.skip(14);
-      } else {
-        r.skip(4);
-        if (shape === 'roundRect' || shape === 'beveledRect' || shape === 'concaveRect') {
-          o.cornerRadius = r.fraction();
-          const ct = r.u8();
-          o.shape = (['beveledRect', 'roundRect', 'concaveRect'] as ShapeKind[])[ct] || 'roundRect';
-        } else if (shape === 'polygon') r.skip(5);
       }
       o.frame = frame;
       o.picture = { rotation: r.fraction(), skew: r.fraction(), offsetLeft: r.fraction(), offsetTop: r.fraction(), scaleH: r.fraction(), scaleV: r.fraction() };
       r.skip(30);
       if (shape === 'polygon') o.polygon = this.polygon3();
+      // A box whose picture is linked to a file carries the file's description (type and path)
+      // as a length-prefixed record; the link field of the header is non-zero for those.
+      if (linkId !== 0) o.picture.file = this.fileInfo3();
       if (runaroundId !== 0) { this.skipLengthRecord(); if (clipId !== 0) this.skipLengthRecord(); }
       this.deob.next33();
       return o;
@@ -307,6 +325,17 @@ class PageReader {
     o.members = this.members(count, objectsCount, index);
     this.deob.next33();
     return o;
+  }
+
+  /** The linked file record of a 3.x picture box: a 4-byte type tag ("PCX", "TIFF", "EPSF"...) then the path. */
+  private fileInfo3(): string {
+    const r = this.r;
+    const len = r.u32();
+    if (len > r.remaining) throw new ObjectError('file record runs past the end');
+    const b = r.bytes(len);
+    let s = '';
+    for (let i = 24; i < b.length && b[i] !== 0; i++) s += String.fromCharCode(b[i]);
+    return s;
   }
 
   private polygon3(): Pt[] {
@@ -383,7 +412,8 @@ class PageReader {
       else if (isBezierLine) { r.skip(44); bezierData(); }
       else if (isBezierBox) { r.skip(44); if (gradientId !== 0) o.fill = this.gradient(color); bezierData(); }
       else { r.skip(4); o.bbox = this.bbox(); o.cornerRadius = r.fraction(); r.skip(20); if (gradientId !== 0) o.fill = this.gradient(color); }
-      if (isLine || isBezierLine) { o.frame.color = typeof o.fill === 'string' ? o.fill : o.frame.color; delete o.fill; }
+      // 4.x lines take their color from the frame record (the header color is the box background).
+      if (isLine || isBezierLine) delete o.fill;
     } else if (content === 'picture') {
       if (isLine || isBezierLine) throw new ObjectError('a line cannot hold a picture');
       o.frame = this.frame();
@@ -416,7 +446,6 @@ class PageReader {
         r.skip(4);
         if (isBezierLine) bezierData();
         textEnd();
-        o.frame.color = typeof o.fill === 'string' ? o.fill : o.frame.color;
         delete o.fill;
       } else {
         if (isBezierBox) r.skip(44);

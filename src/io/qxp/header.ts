@@ -92,6 +92,6 @@ export function readQxpHeader(b: Uint8Array): QxpHeader {
     h.seed = r.u16();
     h.increment = r.u16();
   }
-  if (h.pagesCount > 2000 || h.masterPagesCount > 127) throw new Error('The page count in the header is not plausible; the file is damaged.');
+  if (h.pagesCount > 10000) throw new Error('The page count in the header is not plausible; the file is damaged.');
   return h;
 }

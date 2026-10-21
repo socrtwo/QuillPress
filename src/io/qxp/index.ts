@@ -18,8 +18,8 @@ import { mediaFromBytes } from '../images';
 import { Reader, getChain } from './blocks';
 import { readQxpHeader, unwrapMacBinary, type QxpHeader } from './header';
 import { QxpTables, type LineStyle, type Rect, type Pt } from './records';
-import { readPages, type QxpObject, type Frame, type Gradient } from './objects';
-import { readStory, storyParagraphs, type QxpText } from './text';
+import { readPages, type QxpObject, type QxpPage, type Frame, type Gradient } from './objects';
+import { readStory, storyParagraphs, textRange, textWithout, type QxpText } from './text';
 
 export { unwrapMacBinary, isMacBinaryQxp, readQxpHeader } from './header';
 
@@ -29,6 +29,7 @@ export async function importQxp(data: Uint8Array, name: string): Promise<LegacyI
   let header: QxpHeader;
   try { header = readQxpHeader(bytes); } catch (e) { return harvestLayout(bytes, name, 'qxp', (e as Error).message); }
   if (header.type === 'BK' || header.type === 'LB') return harvestLayout(bytes, name, 'qxp', `${header.label} ${header.type === 'BK' ? 'book' : 'library'} files hold no pages of their own.`);
+  if (header.pagesCount === 0) return harvestLayout(bytes, name, 'qxp', `${header.label}: the file holds no document pages (a library or an empty document).`);
   try {
     return await readLayout(bytes, name, header);
   } catch (e) {
@@ -64,33 +65,56 @@ async function readLayout(bytes: Uint8Array, name: string, header: QxpHeader): P
 
   for (const qp of docPages) {
     const pagesOf: Page[] = qp.offsets.map(() => ({ id: newId('pg'), master: master.id, items: [] }));
-    const items: (Item | null)[] = [];
-    const pageOf: number[] = [];
-    for (const o of qp.objects) {
-      const side = qp.offsets.length === 2 && o.bbox.left >= qp.offsets[1].left ? 1 : 0;
-      pageOf.push(side);
-      let item: Item | null = null;
-      try { item = await toItem(ctx, o, qp.offsets[side]); } catch (e) { warnings.push(`An object on page ${pub.pages.length + side + 1} was skipped (${(e as Error).message}).`); }
-      items.push(item);
-    }
-    // Groups own their members; everything else stays on its page. Objects are stored top-first.
-    const taken = new Set<number>();
-    qp.objects.forEach((o, i) => {
-      const g = items[i];
-      if (!o.members || !g || g.kind !== 'group') return;
-      const kids: Item[] = [];
-      for (const m of o.members) { const k = items[m]; if (k && !taken.has(m)) { taken.add(m); kids.push(k); } }
-      g.children = kids.reverse();
-      if (!kids.length) items[i] = null;
-    });
-    for (let i = items.length - 1; i >= 0; i--) { const it = items[i]; if (it && !taken.has(i)) pagesOf[pageOf[i]].items.push(it); }
+    await placeObjects(ctx, qp, pagesOf.map((p) => p.items), `page ${pub.pages.length + 1}`);
     for (const p of pagesOf) pub.pages.push(p);
+  }
+  // Master pages with objects become masters of their own. QuarkXPress copies master items onto
+  // the pages, so the masters are not applied (that would draw the items twice); they are kept
+  // for pages that lack their copies.
+  const pageCounts = { ...ctx.counts };
+  let masterIndex = 0;
+  for (const qp of pages.filter((p) => p.master)) {
+    masterIndex++;
+    if (!qp.objects.length) continue;
+    const sides: Item[][] = qp.offsets.map(() => []);
+    await placeObjects(ctx, qp, sides, `master page ${masterIndex}`);
+    const base = qp.name || `${String.fromCharCode(64 + Math.min(26, masterIndex))}-Master`;
+    sides.forEach((items, i) => {
+      if (!items.length) return;
+      const name = sides.length === 2 ? `${base} (${i === 0 ? 'left' : 'right'})` : base;
+      pub.data.masters.push({ id: newId('mst'), name, items, margins: [...master.margins] as [number, number, number, number], columns: master.columns, gutter: master.gutter, side: sides.length === 2 ? (i === 0 ? 'left' : 'right') : 'single' });
+      ctx.counts.masters = (ctx.counts.masters || 0) + 1;
+    });
   }
   resolveStories(ctx);
   addSwatches(ctx);
   pub.pruneStories();
-  summarize(ctx, name);
+  summarize(ctx, name, pageCounts);
   return { pub, warnings, textOnly: false };
+}
+
+/** Converts a page's objects and distributes them over the pages of its spread (groups own their members). */
+async function placeObjects(ctx: Ctx, qp: QxpPage, sides: Item[][], where: string): Promise<void> {
+  const items: (Item | null)[] = [];
+  const sideOf: number[] = [];
+  for (const o of qp.objects) {
+    const side = qp.offsets.length === 2 && o.bbox.left >= qp.offsets[1].left ? 1 : 0;
+    sideOf.push(side);
+    let item: Item | null = null;
+    try { item = await toItem(ctx, o, qp.offsets[side]); } catch (e) { ctx.warnings.push(`An object on ${where} was skipped (${(e as Error).message}).`); }
+    items.push(item);
+  }
+  // Objects are stored top-first.
+  const taken = new Set<number>();
+  qp.objects.forEach((o: QxpObject, i: number) => {
+    const g = items[i];
+    if (!o.members || !g || g.kind !== 'group') return;
+    const kids: Item[] = [];
+    for (const m of o.members) { const k = items[m]; if (k && !taken.has(m)) { taken.add(m); kids.push(k); } }
+    g.children = kids.reverse();
+    if (!kids.length) items[i] = null;
+  });
+  for (let i = items.length - 1; i >= 0; i--) { const it = items[i]; if (it && !taken.has(i)) sides[sideOf[i]].push(it); }
 }
 
 // ------------------------------------------------------------------------------------------
@@ -133,7 +157,11 @@ async function toItem(ctx: Ctx, o: QxpObject, off: Rect): Promise<Item | null> {
       const media = await previewMedia(data);
       if (media) { p.media = ctx.pub.addMedia(media); ctx.previews++; }
     }
-    if (!p.media) { ctx.missingPictures++; p.name = 'Picture Box (picture not in file)'; }
+    if (!p.media) {
+      ctx.missingPictures++;
+      const file = o.picture?.file?.split(/[\\/:]/).pop();
+      p.name = file ? `Picture Box (${file} not in file)` : 'Picture Box (picture not in file)';
+    }
     return p;
   }
   // text
@@ -163,7 +191,8 @@ async function toItem(ctx: Ctx, o: QxpObject, off: Rect): Promise<Item | null> {
 /** The story of a text object that starts a chain (the others share it). */
 function ownText(ctx: Ctx, o: QxpObject): QxpText | undefined {
   const l = o.link!;
-  if (l.contentIndex === 0 || l.offsetIntoText !== 0) return undefined;
+  // Blocks 1–3 hold the header and the document chain, so an index below 4 never names a story.
+  if (l.contentIndex < 4 || l.offsetIntoText !== 0) return undefined;
   try { return readStory(ctx.bytes, l.contentIndex, ctx.header, ctx.tables); } catch (e) {
     ctx.warnings.push(`The text of a box could not be read (${(e as Error).message}).`);
     return undefined;
@@ -273,20 +302,28 @@ function resolveStories(ctx: Ctx): void {
   const assign = (refs: TextRef[]) => {
     refs.sort((a, b) => a.link.offsetIntoText - b.link.offsetIntoText);
     const owner = refs.find((r) => r.text && r.link.offsetIntoText === 0) || refs.find((r) => r.text);
-    const paras: Paragraph[] = owner?.text ? storyParagraphs(owner.text) : [{ style: 'Body', runs: [] }];
     const frames = refs.filter((r): r is TextRef & { frame: TextFrame } => r.frame.kind === 'text');
     const paths = refs.filter((r): r is TextRef & { frame: PathTextItem } => r.frame.kind === 'pathText');
+    const empty = (): Paragraph[] => [{ style: 'Body', runs: [] }];
+    // Text paths hold their own text in QuillPress: each one in a chain takes the characters between
+    // its offset and the next object's, and the frames of the chain flow the rest.
+    const ranges: [number, number][] = [];
+    if (owner?.text) {
+      refs.forEach((r, i) => {
+        if (r.frame.kind !== 'pathText') return;
+        const from = r.link.offsetIntoText, to = i + 1 < refs.length ? refs[i + 1].link.offsetIntoText : owner.text!.text.length;
+        if (to > from) { ranges.push([from, to]); (r.frame as PathTextItem).text = storyParagraphs(textRange(owner.text!, from, to)); }
+      });
+    }
+    for (const p of paths) if (!p.frame.text?.length || !ranges.length) p.frame.text = empty();
     if (frames.length) {
-      const story = pub.newStory(paras);
+      const story = pub.newStory(owner?.text ? storyParagraphs(ranges.length ? textWithout(owner.text, ranges) : owner.text) : empty());
       frames.forEach((r, i) => {
         r.frame.story = story.id;
         if (i > 0) r.frame.prev = frames[i - 1].frame.id;
         if (i < frames.length - 1) r.frame.next = frames[i + 1].frame.id;
       });
       if (frames.length > 1) ctx.counts.chains = (ctx.counts.chains || 0) + 1;
-      if (paths.length) { paths.forEach((p) => { p.frame.text = [{ style: 'Body', runs: [] }]; }); ctx.warnings.push('A text path linked into a text chain was imported empty (QuillPress text paths hold their own text).'); }
-    } else {
-      paths.forEach((p, i) => { p.frame.text = i === 0 ? paras : [{ style: 'Body', runs: [] }]; });
     }
   };
   for (const s of singles) assign([s]);
@@ -302,14 +339,15 @@ function addSwatches(ctx: Ctx): void {
   }
 }
 
-function summarize(ctx: Ctx, name: string): void {
-  const c = ctx.counts;
+function summarize(ctx: Ctx, name: string, pageCounts: Record<string, number>): void {
+  const c: Record<string, number | undefined> = { ...pageCounts, masters: ctx.counts.masters };
   const parts: string[] = [];
   const add = (n: number | undefined, one: string, many: string) => { if (n) parts.push(`${n} ${n === 1 ? one : many}`); };
   add(c.textBoxes, 'text box', 'text boxes'); add(c.chains, 'text chain', 'text chains'); add(c.pictures, 'picture box', 'picture boxes');
   add(c.lines, 'line', 'lines'); add(c.shapes, 'box', 'boxes'); add(c.textPaths, 'text path', 'text paths'); add(c.groups, 'group', 'groups');
   const pages = ctx.pub.pages.length;
-  ctx.warnings.unshift(`${ctx.header.label} document "${name}": ${pages} page${pages === 1 ? '' : 's'} read with ${parts.length ? parts.join(', ') : 'no objects'}. Master page items were stored on each page by QuarkXPress and are imported as page items.`);
+  const masters = c.masters ? ` ${c.masters} master page${c.masters === 1 ? '' : 's'} with objects ${c.masters === 1 ? 'was' : 'were'} imported as masters but not applied, because QuarkXPress keeps copies of master items on the pages; apply one from the Pages pane if a page lacks them.` : '';
+  ctx.warnings.unshift(`${ctx.header.label} document "${name}": ${pages} page${pages === 1 ? '' : 's'} read with ${parts.length ? parts.join(', ') : 'no objects'}.${masters}`);
   if (ctx.missingPictures) ctx.warnings.push(`${ctx.missingPictures} picture box${ctx.missingPictures === 1 ? ' is' : 'es are'} empty: QuarkXPress links pictures instead of embedding them${ctx.previews ? ` (${ctx.previews} had a usable preview in the file)` : ''}. Place the original picture files again.`);
   if (ctx.customText) ctx.warnings.push(`${ctx.customText} text box${ctx.customText === 1 ? ' has' : 'es have'} a bezier or polygon outline; QuillPress sets their text in the rectangle.`);
 }

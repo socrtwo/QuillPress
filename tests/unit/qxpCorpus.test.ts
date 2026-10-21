@@ -1,0 +1,177 @@
+/**
+ * The QuarkXPress reader against files saved by QuarkXPress 3.1–4.1 (the Document Liberation
+ * Project's seed corpus). The files are not part of the repository: the tests run when the corpus
+ * is present at the path below and are skipped otherwise.
+ */
+import { describe, it, expect } from 'vitest';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { importQxp } from '../../src/io/qxp/index';
+import type { TextFrame, PathTextItem, ShapeItem, GroupItem, LineItem, PictureFrame } from '../../src/model/types';
+
+const DIR = '/home/user/samples/qxp/qxp';
+const has = existsSync(DIR);
+
+const load = (name: string) => importQxp(new Uint8Array(readFileSync(join(DIR, name))), name);
+const items = (r: Awaited<ReturnType<typeof load>>, page = 0) => r.pub.data.pages[page].items;
+const storyText = (r: Awaited<ReturnType<typeof load>>, f: TextFrame) => r.pub.story(f.story)!.paras.map((p) => p.runs.map((x) => x.text).join('')).join('\n');
+
+describe.skipIf(!has)('QuarkXPress corpus', () => {
+  it('reads every file of the corpus without throwing and in reasonable time', async () => {
+    const names = readdirSync(DIR).filter((n) => !n.endsWith('.zip'));
+    expect(names.length).toBeGreaterThan(150);
+    let layout = 0;
+    for (const n of names) {
+      const t0 = Date.now();
+      const r = await load(n);
+      expect(r.pub.data.pages.length, n).toBeGreaterThan(0);
+      expect(Date.now() - t0, `${n} took too long`).toBeLessThan(3000);
+      if (!r.textOnly) layout++;
+    }
+    // Only books, libraries and a 1.x file go to the text harvest.
+    expect(layout).toBeGreaterThanOrEqual(names.length - 6);
+  });
+
+  it('3.3 Windows text boxes: geometry, rotation, text and alignment', async () => {
+    const r = await load('3.3_win-textboxes.qxd');
+    expect(r.textOnly).toBe(false);
+    expect(r.pub.data.size).toEqual({ w: 651.97, h: 566.93 });
+    const frames = items(r).filter((i): i is TextFrame => i.kind === 'text');
+    expect(frames).toHaveLength(6);
+    const big = frames.find((f) => storyText(r, f).startsWith('Lorem ipsum dolor sit amet'))!;
+    expect(big).toBeTruthy();
+    expect(big.w).toBeCloseTo(349.88, 1);
+    expect(big.line?.width).toBe(1);
+    const rotated = frames.find((f) => f.rot)!;
+    expect(rotated.rot).toBe(-35);
+    expect(rotated.fill).toEqual({ type: 'solid', color: '#b3e2ee' });
+    expect(rotated.line?.fill).toEqual({ type: 'solid', color: '#00ff00' });
+    const centered = frames.find((f) => storyText(r, f).startsWith('center'))!;
+    expect(centered.anchor).toBe('ctr');
+    expect(r.pub.story(big.story)!.paras[0].runs[0]).toMatchObject({ font: 'Arial', size: 12 });
+  });
+
+  it('3.3 Mac files decode the same text as their Windows twins', async () => {
+    const mac = await load('3.3_mac-textboxes');
+    const win = await load('3.3_win-textboxes.qxd');
+    const text = (r: typeof mac) => r.pub.data.stories.map((s) => s.paras.map((p) => p.runs.map((x) => x.text).join('')).join('\n')).sort();
+    expect(text(mac)).toEqual(text(win));
+    expect(mac.pub.data.stories.flatMap((s) => s.paras).flatMap((p) => p.runs)[0].font).toBe('Helvetica');
+  });
+
+  it('character formats: fonts, sizes, styles and baseline', async () => {
+    const r = await load('4.0_win-formatting.qxd');
+    const runs = r.pub.data.stories.flatMap((s) => s.paras).flatMap((p) => p.runs);
+    expect(runs.find((x) => x.text === '123')).toMatchObject({ size: 36 });
+    expect(runs.find((x) => x.text === 'Courier')).toMatchObject({ font: 'Courier New' });
+    expect(runs.find((x) => x.text === 'bold')).toMatchObject({ b: true });
+    expect(runs.find((x) => x.text === 'italic')).toMatchObject({ i: true });
+    expect(runs.find((x) => x.text === 'strike')).toMatchObject({ strike: true });
+    expect(runs.find((x) => x.text === 'ALLCAPS')).toMatchObject({ caps: 'all' });
+    expect(runs.find((x) => x.text === 'sup')?.baseline).toBeGreaterThan(0);
+    expect(runs.find((x) => x.text === 'sub')?.baseline).toBeLessThan(0);
+    const paras = r.pub.data.stories.flatMap((s) => s.paras);
+    expect(paras.find((p) => p.runs[0]?.text === 'center')?.align).toBe('ctr');
+    expect(paras.find((p) => p.runs[0]?.text === 'right')?.align).toBe('r');
+    expect(paras.find((p) => p.runs[0]?.text.startsWith('justified'))?.align).toBe('just');
+  });
+
+  it('gradients, dashes and arrows', async () => {
+    const g = await load('3.3_win-gradients.qxd');
+    const shapes = items(g).filter((i): i is ShapeItem => i.kind === 'shape');
+    expect(shapes).toHaveLength(10);
+    expect(shapes.every((s) => s.fill?.type === 'gradient')).toBe(true);
+    expect(shapes.some((s) => s.fill?.type === 'gradient' && s.fill.path === 'radial')).toBe(true);
+    expect(shapes.some((s) => s.geom === 'ellipse')).toBe(true);
+    const d = await load('3.3_mac-dashes');
+    const lines = items(d).filter((i): i is LineItem => i.kind === 'line');
+    expect(lines).toHaveLength(8);
+    expect(new Set(lines.map((l) => l.line.dash || 'solid'))).toContain('dash');
+    expect(new Set(lines.map((l) => l.line.dash || 'solid'))).toContain('dot');
+    const a = await load('4.0_win-arrows.qxd');
+    const arrows = items(a).filter((i): i is LineItem => i.kind === 'line');
+    expect(arrows.some((l) => l.line.head && !l.line.tail)).toBe(true);
+    expect(arrows.some((l) => l.line.head && l.line.tail)).toBe(true);
+  });
+
+  it('4.x lines take their color from the frame record, not the box color', async () => {
+    const r = await load('group.qxd');
+    const groups = items(r).filter((i): i is GroupItem => i.kind === 'group');
+    expect(groups.length).toBeGreaterThan(0);
+    const lines = groups.flatMap((g) => g.children).filter((i): i is LineItem => i.kind === 'line');
+    expect(lines).toHaveLength(4);
+    expect(lines.every((l) => l.line.fill.type === 'solid' && l.line.fill.color === '#000000')).toBe(true);
+    const b = await load('4.0_mac-bezier_lines');
+    const curves = items(b).filter((i): i is ShapeItem => i.kind === 'shape');
+    expect(curves).toHaveLength(6);
+    expect(curves.every((s) => s.geom === 'custom' && s.line?.fill.type === 'solid' && s.line.fill.color !== '#ffffff')).toBe(true);
+  });
+
+  it('3.1 Mac picture boxes and polygons keep the objects after them in step', async () => {
+    const r = await load('shapes-31');
+    expect(r.textOnly).toBe(false);
+    expect(items(r).map((i) => i.kind).sort()).toEqual(['line', 'line', 'picture', 'picture', 'picture', 'text']);
+    const poly = await load('shape-31-2');
+    const box = items(poly)[0] as PictureFrame;
+    expect(box.kind).toBe('picture');
+    expect(poly.warnings.some((w) => /could not be read/.test(w))).toBe(false);
+  });
+
+  it('3.3 picture boxes linked to a file carry the file record and name', async () => {
+    const r = await load('test.qxd');
+    expect(r.textOnly).toBe(false);
+    const pics = items(r).filter((i): i is PictureFrame => i.kind === 'picture');
+    expect(pics).toHaveLength(8);
+    expect(pics.some((p) => p.name.includes('bikers.pcx'))).toBe(true);
+    expect(items(r).filter((i) => i.kind === 'text')).toHaveLength(4);
+  });
+
+  it('keeps the objects read before a damaged one', async () => {
+    const r = await load('shapes.qxd');
+    expect(r.textOnly).toBe(false);
+    expect(items(r).length).toBe(6);
+    expect(r.warnings.some((w) => /could not be read in full/.test(w))).toBe(true);
+  });
+
+  it('many master pages are accepted and master items become masters', async () => {
+    const m5 = await load('masters5.qxd');
+    expect(m5.textOnly).toBe(false);
+    expect(m5.pub.data.pages).toHaveLength(2);
+    const mt = await load('master-text1.qxd');
+    expect(mt.pub.data.masters.length).toBeGreaterThanOrEqual(2);
+    const frames = mt.pub.data.masters.flatMap((m) => m.items).filter((i): i is TextFrame => i.kind === 'text');
+    expect(frames.some((f) => storyText(mt, f) === 'aaaa')).toBe(true);
+    expect(mt.pub.data.pages[0].items).toHaveLength(0);
+    expect(mt.warnings[0]).toMatch(/imported as masters but not applied/);
+  });
+
+  it('text paths in a chain take their share of the text', async () => {
+    const r = await load('4.0_mac-linked_texts');
+    const paths = r.pub.data.pages.flatMap((p) => p.items).filter((i): i is PathTextItem => i.kind === 'pathText');
+    const texts = paths.map((p) => p.text.map((x) => x.runs.map((y) => y.text).join('')).join(''));
+    expect(texts).toEqual(expect.arrayContaining(['678', 't4']));
+    expect(texts.some((t) => t.startsWith('t3qqq'))).toBe(true);
+    const chains = r.pub.data.pages.flatMap((p) => p.items).filter((i): i is TextFrame => i.kind === 'text' && !!i.next);
+    expect(chains.length).toBeGreaterThan(0);
+    expect(r.warnings.some((w) => /imported empty/.test(w))).toBe(false);
+  });
+
+  it('libraries, books and empty documents fall back with a clear reason', async () => {
+    const lib = await load('Q33-TEST.QXL');
+    expect(lib.textOnly).toBe(true);
+    expect(lib.warnings[0]).toMatch(/holds no document pages/);
+    const lib4 = await load('library.qxl');
+    expect(lib4.warnings[0]).toMatch(/library files hold no pages/);
+    const book = await load('book.qxb');
+    expect(book.textOnly).toBe(true);
+  });
+
+  it('facing pages and runaround', async () => {
+    const f = await load('3.3_mac-facing_pages');
+    expect(f.pub.data.pages).toHaveLength(5);
+    expect(f.pub.data.facing).toBe(true);
+    const r = await load('q4run.qxd');
+    const wrapped = items(r).filter((i) => (i as ShapeItem).wrap?.mode === 'square');
+    expect(wrapped.length).toBeGreaterThan(0);
+  });
+});
