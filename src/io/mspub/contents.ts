@@ -27,6 +27,9 @@ function blockDataLength(type: number): number {
 
 export const T_DIRECTORY = 0x90, T_CONTAINER = 0x88, T_STRING = 0xc0, T_DUMMY = 0x78, T_SHAPE_SEQ = 0x70;
 
+/** Container block types (a u32 length followed by child blocks). */
+export const isContainer = (type: number): boolean => type === 0x80 || type === 0x82 || type === 0x88 || type === 0x8a || type === 0x90 || type === 0x98 || type === 0xa0;
+
 /**
  * Reads one block at the cursor. Containers are skipped entirely when `skipContainers` is set;
  * otherwise the cursor stays after the length word so the caller can read the children.
@@ -71,7 +74,7 @@ export function* children(r: Reader, c: Block): Generator<Block> {
 // ------------------------------------------------------------------------------------------
 // Chunk directory
 
-export const CHUNK = { SHAPE: 0x01, ALTSHAPE: 0x20, DOCUMENT: 0x44, PAGE: 0x43, PALETTE: 0x5c, BORDER_ART: 0x46, GROUP: 0x30, LOGO: 0x31, TABLE: 0x10, CELLS: 0x63, FONT: 0x6c } as const;
+export const CHUNK = { SHAPE: 0x01, ALTSHAPE: 0x20, DOCUMENT: 0x44, PAGE: 0x43, PALETTE: 0x5c, BORDER_ART: 0x46, GROUP: 0x30, LOGO: 0x31, TABLE: 0x10, CELLS: 0x63, FONT: 0x6c, PICTURE_SOURCE: 0x66 } as const;
 
 export interface ChunkRef { type: number; offset: number; end: number; seq: number; parent: number }
 
@@ -104,6 +107,10 @@ export interface ContentsInfo {
   /** Palette colors as 0xRRGGBB numbers (black inserted first when the palette is short, as Publisher does). */
   palette: number[];
   fonts: { name: string; eot?: Uint8Array }[];
+  /** Parent chunk of every chunk (shapes sit under their page or group). */
+  parents: Map<number, number>;
+  /** Source file name of a picture, by the picture shape's sequence number. */
+  pictureNames: Map<number, string>;
   borderArt: number;
   warnings: string[];
 }
@@ -154,9 +161,9 @@ function parseDocument(r: Reader, c: ChunkRef, out: ContentsInfo): void {
   r.seek(c.offset);
   const begin = r.pos, len = r.u32();
   for (const b of blocks(r, begin + len)) {
-    if (b.id === 0x12 && b.type === T_CONTAINER) {
+    if (b.id === 0x12 && isContainer(b.type)) {
       for (const sb of children(r, b)) { if (sb.id === 1) out.width = sb.data; else if (sb.id === 2) out.height = sb.data; }
-    } else if (b.id === 0x02 && b.type === T_CONTAINER) {
+    } else if (b.id === 0x02 && isContainer(b.type)) {
       for (const sb of children(r, b)) if (sb.id === 0) out.pageOrder.push(sb.data);
     }
   }
@@ -168,9 +175,9 @@ function parsePage(r: Reader, c: ChunkRef, out: ContentsInfo): void {
   const page: PageChunk = { seq: c.seq, shapes: [], isMaster: false, dummy: DUMMY_PAGES.has(c.seq) };
   for (const b of blocks(r, c.offset + len)) {
     if (b.id === 0x0a && b.type !== T_CONTAINER) page.bgShape = b.data;
-    else if (b.id === 0x02 && b.type === T_CONTAINER) { for (const sb of children(r, b)) if (sb.type === T_SHAPE_SEQ) page.shapes.push(sb.data); }
+    else if (b.id === 0x02 && isContainer(b.type)) { for (const sb of children(r, b)) if (sb.type === T_SHAPE_SEQ) page.shapes.push(sb.data); }
     else if (b.id === 0x0e && b.str) { if (b.str.some((v) => v !== 0)) page.isMaster = true; }
-    else if (b.id === 0x0d && b.type !== T_CONTAINER && b.type !== T_STRING) page.master = b.data;
+    else if (b.id === 0x0d && !isContainer(b.type) && b.type !== T_STRING) page.master = b.data;
   }
   out.pages.set(c.seq, page);
 }
@@ -193,7 +200,7 @@ function parseShape(r: Reader, c: ChunkRef, out: ContentsInfo, cells: ChunkRef[]
       r.seek(rowcol);
       const alen = r.u32();
       for (const b of blocks(r, rowcol + alen)) {
-        if (b.id !== 0 || b.type !== T_CONTAINER) continue;
+        if (b.id !== 0 || !isContainer(b.type)) continue;
         for (const sb of children(r, b)) if (sb.id === 0x02) { if (colWidths.length < cols) colWidths.push(sb.data); else if (rowHeights.length < rows) rowHeights.push(sb.data); }
       }
       const cellList: TableInfo['cells'] = [];
@@ -202,9 +209,9 @@ function parseShape(r: Reader, c: ChunkRef, out: ContentsInfo, cells: ChunkRef[]
         r.seek(cc.offset);
         const clen = r.u32();
         for (const b of blocks(r, cc.offset + clen)) {
-          if (b.id !== 0x02 || b.type !== T_CONTAINER) continue;
+          if (b.id !== 0x02 || !isContainer(b.type)) continue;
           for (const item of children(r, b)) {
-            if (item.id !== 0 || item.type !== T_CONTAINER) continue;
+            if (item.id !== 0 || !isContainer(item.type)) continue;
             const cell = { r0: 0, r1: 0, c0: 0, c1: 0 };
             for (const sb of children(r, item)) {
               if (sb.id === 1) cell.r0 = sb.data; else if (sb.id === 2) cell.r1 = sb.data; else if (sb.id === 3) cell.c0 = sb.data; else if (sb.id === 4) cell.c1 = sb.data;
@@ -242,7 +249,7 @@ function parsePalette(r: Reader, c: ChunkRef, out: ContentsInfo): void {
       const bend = b.dataOffset + b.dataLength;
       while (r.pos < Math.min(bend, r.length)) {
         const sb = readBlock(r, false);
-        if (sb.type === T_CONTAINER) {
+        if (isContainer(sb.type)) {
           for (const e of children(r, sb)) if (e.id === 0x01) { const d = e.data; out.palette.push(((d & 0xff) << 16) | (((d >> 8) & 0xff) << 8) | ((d >> 16) & 0xff)); }
         } else if (sb.type === T_DUMMY) out.palette.push(0);
         skipBlock(r, sb);
@@ -256,9 +263,9 @@ function parseFont(r: Reader, c: ChunkRef, out: ContentsInfo): void {
   r.seek(c.offset);
   const len = r.u32();
   for (const b of blocks(r, c.offset + len)) {
-    if (b.id !== 0x02 || b.type !== T_CONTAINER) continue;
+    if (b.id !== 0x02 || !isContainer(b.type)) continue;
     for (const entry of children(r, b)) {
-      if (entry.id !== 0 || entry.type !== T_CONTAINER) continue;
+      if (entry.id !== 0 || !isContainer(entry.type)) continue;
       let name = '';
       let eot: Uint8Array | undefined;
       for (const sb of children(r, entry)) {
@@ -273,8 +280,9 @@ function parseFont(r: Reader, c: ChunkRef, out: ContentsInfo): void {
 /** Parses the Contents stream of a 2002+ publication. Throws when the trailer or document chunk is missing. */
 export function parseContents(contents: Uint8Array): ContentsInfo {
   const r = new Reader(contents);
-  const out: ContentsInfo = { width: 0, height: 0, pageOrder: [], pages: new Map(), shapes: new Map(), palette: [], fonts: [], borderArt: 0, warnings: [] };
+  const out: ContentsInfo = { width: 0, height: 0, pageOrder: [], pages: new Map(), shapes: new Map(), palette: [], fonts: [], parents: new Map(), pictureNames: new Map(), borderArt: 0, warnings: [] };
   const refs = readChunkDirectory(r);
+  for (const c of refs) out.parents.set(c.seq, c.parent);
   const doc = refs.find((c) => c.type === CHUNK.DOCUMENT);
   if (!doc) throw new Error('Contents has no document chunk');
   const cells = refs.filter((c) => c.type === CHUNK.CELLS);
@@ -283,6 +291,12 @@ export function parseContents(contents: Uint8Array): ContentsInfo {
   out.borderArt = refs.filter((c) => c.type === CHUNK.BORDER_ART).length;
   for (const c of refs) if (c.type === CHUNK.SHAPE || c.type === CHUNK.ALTSHAPE || c.type === CHUNK.GROUP || c.type === CHUNK.LOGO || c.type === CHUNK.TABLE) parseShape(r, c, out, cells);
   for (const c of refs) if (c.type === CHUNK.FONT) parseFont(r, c, out);
+  for (const c of refs) {
+    if (c.type !== CHUNK.PICTURE_SOURCE) continue;
+    r.seek(c.offset);
+    const len = r.u32();
+    for (const b of blocks(r, c.offset + len)) if (b.id === 0x03 && b.str) { const name = utf16Of(b.str); if (name) out.pictureNames.set(c.parent, name); }
+  }
   parseDocument(r, doc, out);
   for (const c of refs) if (c.type === CHUNK.PAGE) parsePage(r, c, out);
   if (!out.width || !out.height) throw new Error('Contents has no page size');

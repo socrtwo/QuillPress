@@ -9,7 +9,7 @@
  * Written from the format description of the Document Liberation Project's Publisher reader.
  */
 import { Reader } from './cfbStreams';
-import { readBlock, blocks, children, T_CONTAINER } from './contents';
+import { readBlock, blocks, children, isContainer } from './contents';
 
 export interface CharStyle {
   bold?: boolean; italic?: boolean;
@@ -89,8 +89,8 @@ export function readCharStyle(r: Reader): CharStyle {
       case 0x1e: st.underline = b.data & 0xff; break;
       case 0x0c: st.size = (b.data * 72) / 914400; break;
       case 0x2e: st.colorIndex = b.data; break;
-      case 0x44: if (b.type === T_CONTAINER) { const p = r.pos; for (const sb of children(r, b)) if (sb.id === 0) { st.colorIndex = sb.data; break; } r.seek(Math.max(p, b.dataOffset + b.dataLength)); } break;
-      case 0x24: if (b.type === T_CONTAINER) { const p = r.pos; for (const sb of children(r, b)) { if (sb.type === T_CONTAINER) { r.seek(sb.dataOffset + 4); if (r.pos < sb.dataOffset + sb.dataLength) st.fontIndex = readBlock(r, true).data; break; } } r.seek(Math.max(p, b.dataOffset + b.dataLength)); } break;
+      case 0x44: if (isContainer(b.type)) { const p = r.pos; for (const sb of children(r, b)) if (sb.id === 0) { st.colorIndex = sb.data; break; } r.seek(Math.max(p, b.dataOffset + b.dataLength)); } break;
+      case 0x24: if (isContainer(b.type)) { const p = r.pos; for (const sb of children(r, b)) { if (isContainer(sb.type)) { r.seek(sb.dataOffset + 4); if (r.pos < sb.dataOffset + sb.dataLength) st.fontIndex = readBlock(r, true).data; break; } } r.seek(Math.max(p, b.dataOffset + b.dataLength)); } break;
       case 0x0f: st.superSub = b.data > 2 ? 0 : b.data; break;
       case 0x04: st.outline = true; break;
       case 0x05: st.shadow = true; break;
@@ -121,12 +121,12 @@ export function readParaStyle(r: Reader): ParaStyle {
       case 0x0c: st.firstIndent = b.data | 0; break;
       case 0x0d: st.leftIndent = b.data; break;
       case 0x0e: st.rightIndent = b.data; break;
-      case 0x32: if (b.type === T_CONTAINER) {
+      case 0x32: if (isContainer(b.type)) {
         const tabs: number[] = [];
         for (const arr of children(r, b)) {
-          if (arr.id !== 0x28 || arr.type !== T_CONTAINER) continue;
+          if (arr.id !== 0x28 || !isContainer(arr.type)) continue;
           for (const e of children(r, arr)) {
-            if (e.type !== T_CONTAINER) continue;
+            if (!isContainer(e.type)) continue;
             r.seek(e.dataOffset + 4);
             if (r.pos < e.dataOffset + e.dataLength) { const t = readBlock(r, true); if (t.id === 0) tabs.push(t.data); }
             r.seek(e.dataOffset + e.dataLength);
@@ -136,7 +136,7 @@ export function readParaStyle(r: Reader): ParaStyle {
         if (tabs.length) st.tabs = tabs;
         break;
       }
-      case 0x57: if (b.type === T_CONTAINER) {
+      case 0x57: if (isContainer(b.type)) {
         isList = true;
         for (const sb of children(r, b)) { if (sb.id === 0) numbering = sb.data; else if (sb.id === 1) bulletChar = sb.data; }
         r.seek(b.dataOffset + b.dataLength);

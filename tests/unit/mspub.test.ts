@@ -407,3 +407,73 @@ describe('Publisher 2000 layout reader', () => {
     expect(warnings.some((w) => /Publisher 2000 files/.test(w))).toBe(true);
   });
 });
+
+// ------------------------------------------------------------------------------------------
+// Real files (Publisher 2007-era weekly ads and a menu), only where the sample folder exists.
+
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+const SAMPLES = '/home/user/samples/pub';
+const sample = (prefix: string) => `${SAMPLES}/${(existsSync(SAMPLES) ? readdirSync(SAMPLES) : []).find((n) => n.startsWith(prefix)) || ''}`;
+
+describe.skipIf(!existsSync(SAMPLES))('Publisher real files', () => {
+  it('reads the Crawford weekly ad: 3 landscape pages, the menu columns and the table', async () => {
+    const { pub, warnings, textOnly } = await importMsPub(new Uint8Array(readFileSync(sample('2a488d82'))), 'crawford.pub');
+    expect(textOnly).toBe(false);
+    expect(pub.size).toEqual({ w: 1008, h: 612 });
+    expect(pub.pages).toHaveLength(3);
+    expect(pub.data.masters).toHaveLength(1);
+    const items = pub.pages[0].items;
+    expect(items).toHaveLength(10);
+    expect(items.map((i) => i.kind)).toEqual(['group', 'table', 'text', 'text', 'text', 'text', 'text', 'text', 'text', 'text']);
+    const cols = items.filter((i): i is TextFrame => i.kind === 'text');
+    const texts = cols.map((f) => textOf(pub.data.stories.find((s) => s.id === f.story)!.paras));
+    expect(texts.some((t) => t.includes('Coconut Corn'))).toBe(true);
+    expect(texts.some((t) => t.includes('Chicken & Corn Chowder'))).toBe(true);
+    expect(cols[1]).toMatchObject({ x: 70.67, y: 88.25, w: 132.21, line: { width: 0.75 } });
+    const table = items.find((i): i is TableItem => i.kind === 'table')!;
+    expect(textOf(table.rows[0].cells[0].text)).toMatch(/RESIDENTIAL\s+LIVING\s+Week 2/);
+    expect(table.rows[0].cells[0].text[0].runs[0]).toMatchObject({ font: 'Elephant', b: true });
+    const group = items[0] as GroupItem;
+    expect(group.children.map((c) => c.kind)).toEqual(['text', 'picture']);
+    expect(Object.values(pub.media).map((m) => m.mime)).toEqual(['image/jpeg']);
+    expect((group.children[1] as PictureFrame).src).toMatch(/image004\.jpg/);
+    expect(pub.data.stories).toHaveLength(9);
+    expect(pub.data.swatches.find((s) => s.name === 'Scheme Color 2')?.color).toBe('#0000FF');
+    expect(warnings[0]).toMatch(/3 pages and 1 master page with 10 objects and 9 stories/);
+  });
+
+  it('reads the Park View ad with its pictures, legend and chains intact', async () => {
+    const { pub } = await importMsPub(new Uint8Array(readFileSync(sample('49d55a1d'))), 'pv.pub');
+    expect(pub.pages).toHaveLength(3);
+    const items = pub.pages[0].items;
+    expect(items).toHaveLength(28);
+    expect(items.filter((i) => i.kind === 'picture')).toHaveLength(10);
+    expect(items.filter((i) => i.kind === 'group')).toHaveLength(4);
+    expect(Object.keys(pub.media)).toHaveLength(7);
+    const note = items.find((i): i is TextFrame => i.kind === 'text' && textOf(pub.data.stories.find((s) => s.id === i.story)!.paras).includes('subject to change'))!;
+    expect(note).toMatchObject({ x: 11.24, y: 582.41, w: 999.06 });
+    const run = pub.data.stories.find((s) => s.id === note.story)!.paras[0].runs.find((r) => r.text.includes('subject'))!;
+    expect(run).toMatchObject({ font: 'Times New Roman', i: true, color: '#c00000' });
+  });
+
+  it('reads the Blue Note menu: Letter pages in document order, picture frames with source names, decorated borders as groups', async () => {
+    const { pub } = await importMsPub(new Uint8Array(readFileSync(sample('53eeea52'))), 'menu.pub');
+    expect(pub.size).toEqual({ w: 612, h: 792 });
+    expect(pub.pages).toHaveLength(3);
+    expect(pub.pages.map((p) => p.items.length)).toEqual([9, 6, 9]);
+    const first = pub.pages[0].items;
+    const title = first.find((i): i is TextFrame => i.kind === 'text' && textOf(pub.data.stories.find((s) => s.id === i.story)!.paras).startsWith('Blue Note Bistro'))!;
+    expect(title).toBeTruthy();
+    const titleRun = pub.data.stories.find((s) => s.id === title.story)!.paras[0].runs[0];
+    expect(titleRun).toMatchObject({ font: 'Calibri', color: 'Scheme Color 6', size: 24, b: true });
+    expect(pub.data.swatches.find((s) => s.name === 'Scheme Color 6')?.color).toBe('#0000FF');
+    const border = first.find((i): i is GroupItem => i.kind === 'group')!;
+    expect(border.children.length).toBeGreaterThan(50);
+    expect(border.children[1]).toMatchObject({ kind: 'shape', geom: 'triangle', fill: { type: 'solid', color: 'Scheme Color 2' } });
+    const pics = pub.pages[1].items.filter((i): i is PictureFrame => i.kind === 'picture');
+    expect(pics.length).toBe(2);
+    expect(pics.map((p) => p.src)).toContain('cold-beverages-e1421417320930[1].jpg');
+    expect(pics.every((p) => p.media && pub.media[p.media].mime === 'image/jpeg')).toBe(true);
+    expect(pub.data.stories.some((s) => textOf(s.paras).includes('Specialty Martini'))).toBe(true);
+  });
+});

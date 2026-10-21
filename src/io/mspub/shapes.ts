@@ -46,6 +46,8 @@ export interface LShape {
   wrap?: boolean;
   borderArt?: boolean;
   alt?: boolean;
+  /** Source file name of a placed picture. */
+  pictureName?: string;
 }
 
 export interface LPage { seq: number; shapes: LShape[]; bg?: Fill; isMaster: boolean; master?: number }
@@ -61,7 +63,7 @@ export interface LDoc {
   pictures: DelayPicture[];
   palette: number[];
   embeddedFonts: number;
-  counts: { unknownShapes: number; borderArt: number; calcGeometry: number; unplaced: number };
+  counts: { unknownShapes: number; borderArt: number; calcGeometry: number; unplaced: number; scratch: number };
   warnings: string[];
 }
 
@@ -140,6 +142,8 @@ function convertShape(es: EscherShape, contents: ContentsInfo, delay: number[], 
   if (chunk?.table) s.table = chunk.table;
   if (chunk?.borderImage != null) { s.borderArt = true; counts.borderArt++; }
   if (chunk?.alt) s.alt = true;
+  const pn = contents.pictureNames.get(es.seq);
+  if (pn) s.pictureName = pn;
   const px = p.get(0x4104) || 0;
   if (px > 0 && px <= delay.length && delay[px - 1] > 0 && delay[px - 1] <= pictures.length) s.picture = delay[px - 1];
   const f = fillOf(p, pal, names, delay, pictures);
@@ -172,19 +176,32 @@ function convertShape(es: EscherShape, contents: ContentsInfo, delay: number[], 
 
 /** Builds the layout document of a 2002+ publication. */
 export function buildLayout(contents: ContentsInfo, quill: QuillInfo | null, escher: EscherInfo, pictures: DelayPicture[], version: string): LDoc {
-  const counts = { unknownShapes: 0, borderArt: 0, calcGeometry: 0, unplaced: 0 };
+  const counts = { unknownShapes: 0, borderArt: 0, calcGeometry: 0, unplaced: 0, scratch: 0 };
   const names = new Map<number, string>();
   contents.palette.forEach((_c, i) => names.set(i, `Scheme Color ${i + 1}`));
   const doc: LDoc = { version, width: contents.width, height: contents.height, pages: [], quill, pictures, palette: contents.palette, embeddedFonts: contents.fonts.filter((f) => f.eot).length, counts, warnings: [...contents.warnings] };
+  // A shape belongs to the page that lists it or, when pages carry no shape lists (Publisher 2007 and
+  // later files), to the page found by climbing its chunk's parents (groups sit between).
   const pageOfShape = new Map<number, number>();
   for (const pg of contents.pages.values()) for (const sq of pg.shapes) pageOfShape.set(sq, pg.seq);
+  const pageByParents = (seq: number): number | undefined => {
+    let cur = seq;
+    for (let i = 0; i < 64; i++) {
+      const parent = contents.parents.get(cur);
+      if (parent == null) return undefined;
+      if (contents.pages.has(parent)) return parent;
+      cur = parent;
+    }
+    return undefined;
+  };
   const shapesByPage = new Map<number, LShape[]>();
   const converted = new Map<number, LShape>();
   for (const es of escher.shapes) {
     const ls = convertShape(es, contents, escher.delayIndex, pictures, names, counts);
     converted.set(ls.seq, ls);
-    const pg = pageOfShape.get(ls.seq);
+    const pg = pageOfShape.get(ls.seq) ?? pageByParents(ls.seq);
     if (pg == null) { counts.unplaced++; continue; }
+    if (contents.pages.get(pg)?.dummy) { counts.scratch++; continue; }
     if (!shapesByPage.has(pg)) shapesByPage.set(pg, []);
     shapesByPage.get(pg)!.push(ls);
   }

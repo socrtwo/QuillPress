@@ -154,7 +154,8 @@ function convert(env: Env, s: LShape, parent?: { x: number; y: number }): Item |
   }
   if (s.picture) {
     const p: PictureFrame = { ...common(env, s, box, newId('pf')), kind: 'picture', fit: 'stretch' } as PictureFrame;
-    if (media) p.media = media; else p.src = `picture ${s.picture} (metafile)`;
+    if (media) p.media = media; else p.src = s.pictureName ? `${s.pictureName} (metafile, not placed)` : `picture ${s.picture} (metafile)`;
+    if (media && s.pictureName) p.src = s.pictureName;
     if (s.brightness) p.brightness = s.brightness;
     if (s.contrast) p.contrast = s.contrast;
     if (s.type === 3) p.geom = 'ellipse';
@@ -240,6 +241,7 @@ export function collectPub(doc: LDoc, name: string): CollectResult {
   if (doc.counts.calcGeometry) w.push(`${doc.counts.calcGeometry} custom shape${doc.counts.calcGeometry === 1 ? ' uses' : 's use'} computed geometry points; the outline is approximate.`);
   if (doc.embeddedFonts) w.push(`${doc.embeddedFonts} embedded font${doc.embeddedFonts === 1 ? '' : 's'} (EOT) were not installed; the font names were kept.`);
   if (env.text?.dropped.fields) w.push(`${env.text.dropped.fields} field code${env.text.dropped.fields === 1 ? '' : 's'} (page numbers, dates) were dropped from the text.`);
+  if (doc.counts.scratch) w.push(`${doc.counts.scratch} object${doc.counts.scratch === 1 ? '' : 's'} on the scratch area outside the pages were skipped.`);
   if (doc.counts.unplaced) w.push(`${doc.counts.unplaced} object${doc.counts.unplaced === 1 ? '' : 's'} belonged to no page and were skipped.`);
   if (!doc.quill) w.push('Text formatting was not available; text was placed with default formatting.');
   return { pub, warnings: w };

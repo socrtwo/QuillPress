@@ -122,7 +122,7 @@ export function parse2k(contents: Uint8Array, quill: QuillInfo | null, version: 
   for (const c of chunks) if (c.marker === 0x0047) for (let j = 0; j < 8; j++) palette.push(color2k(r.u32At(c.offset + 0xa0 + j * 4)));
   const names = new Map<number, string>();
   palette.forEach((_c, i) => names.set(i, `Scheme Color ${i + 1}`));
-  const counts = { unknownShapes: 0, borderArt: 0, calcGeometry: 0, unplaced: 0 };
+  const counts = { unknownShapes: 0, borderArt: 0, calcGeometry: 0, unplaced: 0, scratch: 0 };
   // Image data chunks hold Windows metafiles; they are counted so the frames can say what is missing.
   const imageData = chunks.filter((c) => c.marker === 0x0021);
   const pictures = imageData.map((c) => c.parent);
