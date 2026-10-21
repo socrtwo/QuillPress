@@ -11,6 +11,7 @@
  * (used as a reference for the byte layout only); this code is original.
  */
 import { Reader } from '../qxp/blocks';
+import { openCfb } from '../cfb';
 
 export const REC = {
   FONTS_PARENT: 0x01, PAGE: 0x05, PARA: 0x0b, TIFF: 0x0e, LINE_SET: 0x11, FONTS: 0x13, COLORS: 0x15,
@@ -36,8 +37,22 @@ export interface PmFile {
   byType: Map<number, PmRecord[]>;
 }
 
+/**
+ * PageMaker 6.5 and 7 save the publication as an OLE2 compound file whose "PageMaker" stream holds
+ * the record store; PageMaker 6.0 writes the record store directly. Returns the record store bytes.
+ */
+export function unwrapPageMakerStream(bytes: Uint8Array): Uint8Array {
+  if (!(bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0)) return bytes;
+  const cfb = openCfb(bytes);
+  if (!cfb) throw new Error('The compound file around the PageMaker publication could not be read.');
+  const stream = cfb.read('PageMaker') ?? cfb.entries.filter((e) => e.type === 'stream' && /pagemaker/i.test(e.name)).map((e) => cfb.read(e))[0];
+  if (!stream) throw new Error('The compound file holds no "PageMaker" stream.');
+  return stream;
+}
+
 /** Opens the record store; throws when the header is not PageMaker 6–7. */
-export function openPageMaker(bytes: Uint8Array): PmFile {
+export function openPageMaker(input: Uint8Array): PmFile {
+  const bytes = unwrapPageMakerStream(input);
   if (bytes.length < 0x40) throw new Error('The file is too short to be a PageMaker publication.');
   const mark = bytes[6] | (bytes[7] << 8);
   let be: boolean;

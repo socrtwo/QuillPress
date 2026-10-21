@@ -71,7 +71,12 @@ export function sniffFormat(data: Uint8Array, name: string): string | null {
   if (head.startsWith('\x89PNG') || head.startsWith('\xff\xd8\xff') || head.startsWith('GIF8') || head.startsWith('BM') || head.startsWith('II*\x00') || head.startsWith('MM\x00*') || (head.startsWith('RIFF') && ascii(data, 8, 12) === 'WEBP')) return 'image';
   if (head.startsWith('{\\rtf')) return 'rtf';
   if (data[0] === 0x06 && data[1] === 0x06 && data[2] === 0xed && data[3] === 0xf5) return 'indd';
-  if (data[0] === 0xd0 && data[1] === 0xcf && data[2] === 0x11 && data[3] === 0xe0) return byName === 'pub' || contains(data, 'Q\x00u\x00i\x00l\x00l\x00') ? 'pub' : byName;
+  if (data[0] === 0xd0 && data[1] === 0xcf && data[2] === 0x11 && data[3] === 0xe0) {
+    if (byName === 'pub' || contains(data, 'Q\x00u\x00i\x00l\x00l\x00')) return 'pub';
+    // PageMaker 6.5/7 wrap the record store in a compound file with one "PageMaker" stream.
+    if (byName === 'pmd' || contains(data, 'P\x00a\x00g\x00e\x00M\x00a\x00k\x00e\x00r\x00')) return 'pmd';
+    return byName;
+  }
   if (/^.{2}(MM|II)XPR[0-9]/s.test(head)) return 'qxp';
   // A Mac QuarkXPress file wrapped in MacBinary: the header starts after the 128-byte MacBinary block.
   if (data.length > 140 && /^(MM|II)XPR[0-9]/.test(ascii(data, 130, 136))) return 'qxp';
