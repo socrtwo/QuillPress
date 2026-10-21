@@ -333,9 +333,14 @@ class PageReader {
     const len = r.u32();
     if (len > r.remaining) throw new ObjectError('file record runs past the end');
     const b = r.bytes(len);
-    let s = '';
-    for (let i = 24; i < b.length && b[i] !== 0; i++) s += String.fromCharCode(b[i]);
-    return s;
+    // The path is the last run of printable characters in the record.
+    let s = '', last = '';
+    for (let i = 4; i < b.length; i++) {
+      const c = b[i];
+      if (c >= 32 && c < 127) s += String.fromCharCode(c);
+      else { if (s.length >= 3) last = s; s = ''; }
+    }
+    return s.length >= 3 ? s : last;
   }
 
   private polygon3(): Pt[] {

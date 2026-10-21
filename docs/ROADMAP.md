@@ -44,7 +44,8 @@
 
 - [x] IDML import and export (spreads, masters, linked frames, stories, styles, swatches, links, footnotes); FrameMaker MIF and XPress Tags import.
 - [x] Publisher (2002–2016 fully; 2000 and 97/98 in part), QuarkXPress 3.1–4.1 and PageMaker 6–7 layout readers written from the Document Liberation Project's format descriptions; other versions and INDD files open with their text and pictures.
-- [ ] Verification of the binary readers against files saved by Publisher, QuarkXPress and PageMaker (none were available); PDF placement; EPUB and PDF/X export; data merge.
+- [x] Verification of the binary readers against files saved by Publisher, QuarkXPress and PageMaker (three Publisher 2007 files and the Document Liberation Project's seed corpora).
+- [ ] PDF placement; EPUB and PDF/X export; data merge; Publisher 2000 cell borders; PageMaker skew and master pages; QuarkXPress shadow/outline type styles.
 
 ## M6 — Collaboration and suite
 

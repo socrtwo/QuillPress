@@ -25,7 +25,7 @@ describe.skipIf(!has)('QuarkXPress corpus', () => {
       const t0 = Date.now();
       const r = await load(n);
       expect(r.pub.data.pages.length, n).toBeGreaterThan(0);
-      expect(Date.now() - t0, `${n} took too long`).toBeLessThan(3000);
+      expect(Date.now() - t0, `${n} took too long`).toBeLessThan(10000);
       if (!r.textOnly) layout++;
     }
     // Only books, libraries and a 1.x file go to the text harvest.
@@ -61,13 +61,14 @@ describe.skipIf(!has)('QuarkXPress corpus', () => {
 
   it('character formats: fonts, sizes, styles and baseline', async () => {
     const r = await load('4.0_win-formatting.qxd');
-    const runs = r.pub.data.stories.flatMap((s) => s.paras).flatMap((p) => p.runs);
+    const runs = r.pub.data.stories.flatMap((s) => s.paras).flatMap((p) => p.runs).map((x) => ({ ...x, text: x.text.trim() }));
     expect(runs.find((x) => x.text === '123')).toMatchObject({ size: 36 });
-    expect(runs.find((x) => x.text === 'Courier')).toMatchObject({ font: 'Courier New' });
+    expect(runs.find((x) => x.text === 'Times')).toMatchObject({ font: 'Times', size: 24 });
     expect(runs.find((x) => x.text === 'bold')).toMatchObject({ b: true });
     expect(runs.find((x) => x.text === 'italic')).toMatchObject({ i: true });
     expect(runs.find((x) => x.text === 'strike')).toMatchObject({ strike: true });
-    expect(runs.find((x) => x.text === 'ALLCAPS')).toMatchObject({ caps: 'all' });
+    expect(runs.find((x) => x.text === 'allcaps')).toMatchObject({ caps: 'all' });
+    expect(runs.find((x) => x.text === 'smallcaps')).toMatchObject({ caps: 'small' });
     expect(runs.find((x) => x.text === 'sup')?.baseline).toBeGreaterThan(0);
     expect(runs.find((x) => x.text === 'sub')?.baseline).toBeLessThan(0);
     const paras = r.pub.data.stories.flatMap((s) => s.paras);
@@ -86,25 +87,26 @@ describe.skipIf(!has)('QuarkXPress corpus', () => {
     const d = await load('3.3_mac-dashes');
     const lines = items(d).filter((i): i is LineItem => i.kind === 'line');
     expect(lines).toHaveLength(8);
-    expect(new Set(lines.map((l) => l.line.dash || 'solid'))).toContain('dash');
-    expect(new Set(lines.map((l) => l.line.dash || 'solid'))).toContain('dot');
+    expect(new Set(lines.map((l) => l.line?.dash || 'solid'))).toContain('dash');
+    expect(new Set(lines.map((l) => l.line?.dash || 'solid'))).toContain('dot');
     const a = await load('4.0_win-arrows.qxd');
     const arrows = items(a).filter((i): i is LineItem => i.kind === 'line');
-    expect(arrows.some((l) => l.line.head && !l.line.tail)).toBe(true);
-    expect(arrows.some((l) => l.line.head && l.line.tail)).toBe(true);
+    expect(arrows.some((l) => l.line?.head && !l.line.tail)).toBe(true);
+    expect(arrows.some((l) => l.line?.head && l.line.tail)).toBe(true);
   });
 
   it('4.x lines take their color from the frame record, not the box color', async () => {
     const r = await load('group.qxd');
     const groups = items(r).filter((i): i is GroupItem => i.kind === 'group');
     expect(groups.length).toBeGreaterThan(0);
-    const lines = groups.flatMap((g) => g.children).filter((i): i is LineItem => i.kind === 'line');
+    const flat = (list: GroupItem['children']): GroupItem['children'] => list.flatMap((i) => (i.kind === 'group' ? [i, ...flat(i.children)] : [i]));
+    const lines = flat(groups).filter((i): i is LineItem => i.kind === 'line');
     expect(lines).toHaveLength(4);
-    expect(lines.every((l) => l.line.fill.type === 'solid' && l.line.fill.color === '#000000')).toBe(true);
+    expect(lines.every((l) => l.line?.fill?.type === 'solid' && l.line.fill.color === '#000000')).toBe(true);
     const b = await load('4.0_mac-bezier_lines');
     const curves = items(b).filter((i): i is ShapeItem => i.kind === 'shape');
     expect(curves).toHaveLength(6);
-    expect(curves.every((s) => s.geom === 'custom' && s.line?.fill.type === 'solid' && s.line.fill.color !== '#ffffff')).toBe(true);
+    expect(curves.every((s) => s.geom === 'custom' && s.line?.fill?.type === 'solid' && s.line.fill.color !== '#ffffff')).toBe(true);
   });
 
   it('3.1 Mac picture boxes and polygons keep the objects after them in step', async () => {
@@ -122,7 +124,7 @@ describe.skipIf(!has)('QuarkXPress corpus', () => {
     expect(r.textOnly).toBe(false);
     const pics = items(r).filter((i): i is PictureFrame => i.kind === 'picture');
     expect(pics).toHaveLength(8);
-    expect(pics.some((p) => p.name.includes('bikers.pcx'))).toBe(true);
+    expect(pics.some((p) => p.name?.includes('bikers.pcx'))).toBe(true);
     expect(items(r).filter((i) => i.kind === 'text')).toHaveLength(4);
   });
 

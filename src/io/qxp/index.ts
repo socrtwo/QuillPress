@@ -340,7 +340,7 @@ function addSwatches(ctx: Ctx): void {
 }
 
 function summarize(ctx: Ctx, name: string, pageCounts: Record<string, number>): void {
-  const c: Record<string, number | undefined> = { ...pageCounts, masters: ctx.counts.masters };
+  const c: Record<string, number | undefined> = { ...pageCounts, chains: ctx.counts.chains, masters: ctx.counts.masters };
   const parts: string[] = [];
   const add = (n: number | undefined, one: string, many: string) => { if (n) parts.push(`${n} ${n === 1 ? one : many}`); };
   add(c.textBoxes, 'text box', 'text boxes'); add(c.chains, 'text chain', 'text chains'); add(c.pictures, 'picture box', 'picture boxes');
