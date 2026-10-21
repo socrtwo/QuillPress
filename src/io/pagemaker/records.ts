@@ -18,7 +18,10 @@ export const REC = {
   GLOBAL_INFO: 0x18, SHAPE: 0x19, TEXT_BLOCK: 0x1a, CHARS: 0x1c, XFORM: 0x28,
 } as const;
 
-/** Fixed record sizes by container type (text and picture bytes have none: one byte per record). */
+/**
+ * Fixed record sizes by container type (text and picture bytes have none: one byte per record).
+ * Shape records are 258 bytes in PageMaker 6.5 and 7 and 136 bytes in PageMaker 6.0 (see PmFile.v60).
+ */
 export const RECORD_SIZE: Record<number, number> = {
   [REC.SHAPE]: 258, [REC.GLOBAL_INFO]: 2496, [REC.PAGE]: 472, [REC.LINE_SET]: 4, [REC.XFORM]: 26,
   [REC.TEXT_BLOCK]: 36, [REC.CHARS]: 30, [REC.PARA]: 80, [REC.FONTS]: 94, [REC.FONTS_PARENT]: 10, [REC.COLORS]: 210,
@@ -33,6 +36,8 @@ export interface PmFile {
   bytes: Uint8Array;
   be: boolean;
   encoding: 'windows-1252' | 'macintosh';
+  /** PageMaker 6.0 (header byte 0x2a is 0x32): shorter shape records, no compound-file wrapper. */
+  v60: boolean;
   records: PmRecord[];
   byType: Map<number, PmRecord[]>;
 }
@@ -65,7 +70,7 @@ export function openPageMaker(input: Uint8Array): PmFile {
   r.seek(0x30);
   const tocOffset = r.u32();
   if (tocOffset === 0 || tocOffset >= bytes.length) throw new Error('The table of contents offset points outside the file.');
-  const file: PmFile = { bytes, be, encoding: be ? 'macintosh' : 'windows-1252', records: [], byType: new Map() };
+  const file: PmFile = { bytes, be, encoding: be ? 'macintosh' : 'windows-1252', v60: bytes[0x2a] === 0x32, records: [], byType: new Map() };
   const state = { seq: 0, seen: new Set<number>() };
   try { readTable(file, r, tocOffset, tocLength, false, 0, state); } catch { /* keep what was read */ }
   if (!file.records.length) throw new Error('The table of contents is empty or damaged.');
@@ -109,11 +114,17 @@ function readEntry(file: PmFile, r: Reader, sub: boolean, subType: number, state
 /** The containers sharing a sequence number, in file order. */
 export function withSeq(file: PmFile, seq: number): PmRecord[] { return file.records.filter((r) => r.seq === seq); }
 
+/** Size of one record of a container type in this file (shape records are shorter in PageMaker 6.0). */
+export function recordSize(file: PmFile, type: number): number | undefined {
+  if (type === REC.SHAPE) return file.v60 ? 136 : 258;
+  return RECORD_SIZE[type];
+}
+
 /** A reader positioned at record `index` of a container. */
 export function recordAt(file: PmFile, rec: PmRecord, index: number): Reader {
   let off = rec.offset;
   if (index > 0) {
-    const size = RECORD_SIZE[rec.type];
+    const size = recordSize(file, rec.type);
     if (!size) throw new Error(`records of type ${rec.type} have no known size`);
     off += size * index;
   }

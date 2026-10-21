@@ -78,7 +78,7 @@ export function readTextBlock(file: PmFile, id: number): PmText {
         const flags = r.u8();
         const align = r.u8();
         r.skip(6);
-        const left = r.u16(), first = r.u16(), right = r.u16(), before = r.u16(), after = r.u16();
+        const left = r.i16(), first = r.i16(), right = r.i16(), before = r.u16(), after = r.u16(); // first is negative for hanging indents
         r.skip(18);
         r.skip(1); // hyphens in a row
         r.skip(1);

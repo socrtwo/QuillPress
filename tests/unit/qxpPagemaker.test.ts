@@ -304,7 +304,8 @@ const PM_TEXT = 'Garden club news\rSpring meeting at noon.\r';
 
 function pmFile(opts: { doubleSided?: boolean } = {}): Uint8Array {
   const f = new W();
-  f.raw([0, 0, 0xff, 0xff, 0, 0, 0xff, 0x99]);
+  f.raw([0, 0, 0, 0, 0, 0, 0xff, 0x99]);
+  f.padTo(0x2a).u8(0x33); // version byte: 6.5/7
   f.padTo(0x40).str('Adobe PageMaker 6.5');
   f.padTo(0x200);
   // Containers in table order; the table entry index is the sequence number.
@@ -323,7 +324,7 @@ function pmFile(opts: { doubleSided?: boolean } = {}): Uint8Array {
   const shape = (body: (w: W) => void) => { const s = new W(); body(s); s.padTo(258); sh.raw(s.bytes); };
   shape((w) => { w.u8(1).padTo(6).i16(-5400).i16(-6480).i16(5400).i16(-3600).padTo(28).u32(0).u32(42); }); // text block
   shape((w) => { w.u8(4).padTo(4).u8(1).padTo(6).i16(-5400).i16(-3000).i16(-3000).i16(-1000).padTo(28).u32(0).u8(0).padTo(35).u16(10).padTo(38).u8(2).padTo(40).u8(0).padTo(44).u8(100).padTo(224).u8(100); }); // rectangle
-  shape((w) => { w.u8(3).padTo(4).u8(0).padTo(6).i16(-5400).i16(0).i16(5400).i16(0).padTo(38).u16(0).padTo(46).u8(5).padTo(48).u16(5).padTo(51).u8(100); }); // dashed line
+  shape((w) => { w.u8(3).padTo(4).u16(0).i16(-5400).i16(0).i16(5400).i16(0).padTo(32).u8(5).padTo(34).u32(5 * 256).padTo(38).u16(257).padTo(40).i16(-5400).i16(0).i16(5400).i16(0); }); // dashed line: stroke type, 24.8 width in fifths of a point, end points
   shape((w) => { w.u8(6).padTo(6).i16(0).i16(-3000).i16(2000).i16(-1000).padTo(28).u32(0).padTo(48).u16(TIFF_SEQ); }); // bitmap
   shape((w) => { w.u8(5).padTo(4).u8(0).padTo(6).i16(2000).i16(1000).i16(4000).i16(2000).padTo(28).u32(7).u8(0).padTo(35).u16(5).padTo(38).u8(0).padTo(40).u8(1).padTo(44).u8(100).padTo(224).u8(100); }); // rotated ellipse
   add(0x19, 5, sh);

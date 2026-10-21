@@ -39,6 +39,7 @@ export function isIndd(b: Uint8Array): boolean {
 export function isPageMaker(b: Uint8Array): boolean {
   if (b.length < 64) return false;
   const mark = (b[0] === 0 && b[1] === 0 && b[2] === 0xff && b[3] === 0xff) || (b[0] === 0xff && b[1] === 0xff && b[2] === 0 && b[3] === 0);
+  if (b[0] === 0 && b[1] === 0 && b[2] === 0 && b[3] === 0 && ((b[6] === 0x99 && b[7] === 0xff) || (b[6] === 0xff && b[7] === 0x99)) && (b[0x2a] === 0x32 || b[0x2a] === 0x33)) return true;
   const cfb = b[0] === 0xd0 && b[1] === 0xcf && b[2] === 0x11 && b[3] === 0xe0;
   if (cfb) { let s = ''; for (let i = 0; i + 1 < Math.min(b.length, 65536); i += 2) s += b[i + 1] === 0 && b[i] >= 32 && b[i] < 127 ? String.fromCharCode(b[i]) : '.'; return /PageMaker/.test(s); }
   if (!mark) return false;

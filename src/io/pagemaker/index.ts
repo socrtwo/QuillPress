@@ -8,7 +8,7 @@
  * reader cannot parse.
  */
 import { Pub, newId } from '../../model/pub';
-import type { Page, Item, TextFrame, PictureFrame, ShapeItem, LineItem, Fill, Line, Dash } from '../../model/types';
+import type { Page, Item, TextFrame, PictureFrame, ShapeItem, LineItem, GroupItem, Fill, Line, Dash } from '../../model/types';
 import { harvestLayout, type LegacyImport } from '../legacyLayout';
 import { mediaFromBytes } from '../images';
 import { openPageMaker, readXforms, readFonts, readColors, readGlobalInfo, UNITS_PER_POINT, type PmFile, type Pt } from './records';
@@ -45,21 +45,24 @@ async function readLayout(file: PmFile, name: string): Promise<LegacyImport> {
   const ctx: Ctx = { pub, env, warnings, counts: {}, missingPictures: 0, metafiles: 0 };
   const master = pub.data.masters[0];
   const halfW = global.pageW / 2, halfH = global.pageH / 2;
+  // Single-sided: shapes sit around the page center. Double-sided: each page record holds the
+  // shapes of a spread around the spine; those left of the spine belong to the previous (left-hand)
+  // page, and a shape across the spine is drawn on both pages.
+  const placed: { shape: PmShape; origin: Pt }[][] = pmPages.map(() => []);
+  for (let i = 0; i < pmPages.length; i++) {
+    for (const s of pmPages[i].shapes) {
+      if (!global.doubleSided) { placed[i].push({ shape: s, origin: { x: halfW, y: halfH } }); continue; }
+      const [x0, x1] = [Math.min(s.tl.x, s.br.x), Math.max(s.tl.x, s.br.x)];
+      if (x1 >= 0) placed[i].push({ shape: s, origin: { x: 0, y: halfH } });
+      if (x0 < 0 && i > 0 && (x1 < 0 || s.kind !== 'text')) placed[i - 1].push({ shape: s, origin: { x: global.pageW, y: halfH } });
+    }
+  }
   for (let i = 0; i < pmPages.length; i++) {
     const page: Page = { id: newId('pg'), master: master.id, items: [] };
-    // Shapes sit around the page center; in a double-sided publication around the spine, with the
-    // first page a right-hand page.
-    const left = global.doubleSided && i % 2 === 1;
-    const origin: Pt = global.doubleSided ? { x: left ? global.pageW : 0, y: halfH } : { x: halfW, y: halfH };
-    for (const s of pmPages[i].shapes) {
+    for (const { shape, origin } of placed[i]) {
       try {
-        const item = await toItem(ctx, s, origin);
-        if (!item) continue;
-        if (global.doubleSided) {
-          const cx = item.x + item.w / 2;
-          if (cx < -size.w * 0.05 || cx > size.w * 1.05) continue; // the other page of the spread
-        }
-        page.items.push(item);
+        const item = await toItem(ctx, shape, origin);
+        if (item) page.items.push(item);
       } catch (e) { warnings.push(`An object on page ${i + 1} was skipped (${(e as Error).message}).`); }
     }
     pub.pages.push(page);
@@ -69,10 +72,10 @@ async function readLayout(file: PmFile, name: string): Promise<LegacyImport> {
   return { pub, warnings, textOnly: false };
 }
 
-function strokeLine(ctx: Ctx, s: PmStroke | undefined): Line | undefined {
-  if (!s) return undefined;
+function strokeLine(ctx: Ctx, s: PmStroke | undefined, hairline = false): Line | undefined {
+  if (!s || (!hairline && !(s.width > 0))) return undefined;
   const color = tinted(ctx.env.colors[s.color] || '#000000', s.tint || 100);
-  const width = s.width > 0 ? r2(s.width / 5) : 0.25;
+  const width = s.width > 0 ? r2(Math.max(0.25, s.width / 5)) : 0.25;
   const dash: Dash | undefined = s.type === 5 ? 'dash' : s.type === 6 ? 'sysDot' : s.type === 7 ? 'dot' : undefined;
   const l: Line = { width, fill: { type: 'solid', color } };
   if (dash) l.dash = dash;
@@ -111,16 +114,34 @@ async function toItem(ctx: Ctx, s: PmShape, origin: Pt): Promise<Item | null> {
   switch (s.kind) {
     case 'line': {
       count('lines');
-      const l: LineItem = { id: newId('ln'), kind: 'line', name: 'Line', ...base, ...(s.mirrored ? { flipV: true } : {}), line: strokeLine(ctx, s.stroke) };
+      const a = s.from || s.tl, b = s.to || s.br;
+      const x0 = Math.min(a.x, b.x), y0 = Math.min(a.y, b.y);
+      // A line runs from its box's top-left to bottom-right unless flipped.
+      const flipV = (a.x < b.x) !== (a.y < b.y) && a.y !== b.y;
+      const l: LineItem = { id: newId('ln'), kind: 'line', name: 'Line', x: r2(pt(x0 + origin.x)), y: r2(pt(y0 + origin.y)), w: r2(pt(Math.abs(b.x - a.x))), h: r2(pt(Math.abs(b.y - a.y))), ...(flipV ? { flipV: true } : {}), line: strokeLine(ctx, s.stroke, true) };
       return l;
+    }
+    case 'group': {
+      const children: Item[] = [];
+      for (const c of s.children || []) { const it = await toItem(ctx, c, origin); if (it) children.push(it); }
+      if (!children.length) return null;
+      count('groups');
+      const x = Math.min(...children.map((c) => c.x)), y = Math.min(...children.map((c) => c.y));
+      const x2 = Math.max(...children.map((c) => c.x + c.w)), y2 = Math.max(...children.map((c) => c.y + c.h));
+      const g: GroupItem = { id: newId('grp'), kind: 'group', name: 'Group', x: r2(x), y: r2(y), w: r2(x2 - x), h: r2(y2 - y), children };
+      return g;
     }
     case 'rect': case 'ellipse': case 'polygon': {
       count('shapes');
       const sh: ShapeItem = { id: newId('shp'), kind: 'shape', name: s.kind === 'ellipse' ? 'Ellipse' : s.kind === 'polygon' ? 'Polygon' : 'Rectangle', ...base, geom: s.kind === 'ellipse' ? 'ellipse' : 'rect', fill: fillOf(ctx, s.fill) };
       const line = strokeLine(ctx, s.stroke);
-      if (line && s.stroke && s.stroke.width > 0) sh.line = line;
+      if (line) sh.line = line;
       if (s.kind === 'polygon' && s.points && s.points.length >= 2) {
-        const x0 = Math.min(s.tl.x, s.br.x), y0 = Math.min(s.tl.y, s.br.y);
+        // Points are in page units; for a rotated or skewed polygon they are relative to the center
+        // of its unrotated box (the transform record's box), which the item's rotation then turns.
+        const turned = !!(s.xform.rotation || s.xform.skew);
+        const x0 = turned ? Math.min(s.xform.topLeft.x, s.xform.botRight.x) : Math.min(s.tl.x, s.br.x);
+        const y0 = turned ? Math.min(s.xform.topLeft.y, s.xform.botRight.y) : Math.min(s.tl.y, s.br.y);
         const d = s.points.map((p, i) => `${i ? 'L' : 'M'}${r2(pt(p.x - x0))} ${r2(pt(p.y - y0))}`).join(' ') + (s.closed ? ' Z' : '');
         sh.geom = 'custom';
         sh.path = [{ d, w: box.w || 1, h: box.h || 1 }];
@@ -131,7 +152,8 @@ async function toItem(ctx: Ctx, s: PmShape, origin: Pt): Promise<Item | null> {
       count('textBlocks');
       const paras = s.text ? textParagraphs(s.text, ctx.env) : [{ style: 'Body', runs: [] }];
       const story = ctx.pub.newStory(paras);
-      const f: TextFrame = { id: newId('tf'), kind: 'text', name: 'Text Block', story: story.id, ...base, insets: [0, 0, 0, 0] };
+      // PageMaker sizes a block to its lines exactly; let the frame grow so rounding never hides a line.
+      const f: TextFrame = { id: newId('tf'), kind: 'text', name: 'Text Block', story: story.id, ...base, insets: [0, 0, 0, 0], autosize: 'height' };
       return f;
     }
     case 'picture': {
@@ -152,9 +174,9 @@ function summarize(ctx: Ctx, name: string): void {
   const c = ctx.counts;
   const parts: string[] = [];
   const add = (n: number | undefined, one: string, many: string) => { if (n) parts.push(`${n} ${n === 1 ? one : many}`); };
-  add(c.textBlocks, 'text block', 'text blocks'); add(c.pictures, 'picture', 'pictures'); add(c.lines, 'line', 'lines'); add(c.shapes, 'shape', 'shapes');
+  add(c.textBlocks, 'text block', 'text blocks'); add(c.pictures, 'picture', 'pictures'); add(c.lines, 'line', 'lines'); add(c.shapes, 'shape', 'shapes'); add(c.groups, 'group', 'groups');
   const pages = ctx.pub.pages.length;
-  ctx.warnings.unshift(`PageMaker publication "${name}": ${pages} page${pages === 1 ? '' : 's'} read with ${parts.length ? parts.join(', ') : 'no objects'}. Text blocks are independent frames (PageMaker threads are not kept); master page items are not stored with the pages and were not imported.`);
+  ctx.warnings.unshift(`PageMaker publication "${name}": ${pages} page${pages === 1 ? '' : 's'} read with ${parts.length ? parts.join(', ') : 'no objects'}. Text blocks are independent frames (PageMaker threads are not kept); master page items could not be identified in the file and were not imported; skew is ignored.`);
   if (ctx.missingPictures) ctx.warnings.push(`${ctx.missingPictures} placed picture${ctx.missingPictures === 1 ? '' : 's'} could not be decoded (PageMaker keeps a TIFF copy in the file; compressed or unusual TIFFs are not readable yet). Place the original picture files again.`);
   if (ctx.metafiles) ctx.warnings.push(`${ctx.metafiles} placed Windows metafile${ctx.metafiles === 1 ? ' was' : 's were'} left as empty picture frames.`);
 }

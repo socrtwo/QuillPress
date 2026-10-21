@@ -80,6 +80,8 @@ export function sniffFormat(data: Uint8Array, name: string): string | null {
   if (/^.{2}(MM|II)XPR[0-9]/s.test(head)) return 'qxp';
   // A Mac QuarkXPress file wrapped in MacBinary: the header starts after the 128-byte MacBinary block.
   if (data.length > 140 && /^(MM|II)XPR[0-9]/.test(ascii(data, 130, 136))) return 'qxp';
+  // A raw PageMaker 6.x record store: six zero bytes, the byte-order marker 99 FF / FF 99, version byte 0x32/0x33.
+  if (data.length > 0x40 && data[0] === 0 && data[1] === 0 && data[2] === 0 && data[3] === 0 && ((data[6] === 0x99 && data[7] === 0xff) || (data[6] === 0xff && data[7] === 0x99)) && (data[0x2a] === 0x32 || data[0x2a] === 0x33)) return 'pmd';
   if (((data[0] === 0 && data[1] === 0 && data[2] === 0xff && data[3] === 0xff) || (data[0] === 0xff && data[1] === 0xff && data[2] === 0 && data[3] === 0)) && (contains(data, 'PageMaker', 8192) || byName === 'pmd')) return 'pmd';
   const text = new TextDecoder().decode(data.subarray(0, 4096)).replace(/^﻿/, '');
   if (/^\s*<MIFFile/.test(text)) return 'mif';
