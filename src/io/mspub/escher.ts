@@ -72,9 +72,12 @@ function readFopt(r: Reader, rec: EscherRecord): { props: Map<number, number>; c
     const n = r.u16At(r.pos);
     let entry = r.u16At(r.pos + 4);
     if (entry === 0xfff0) entry = 4;
-    const total = Math.min(6 + entry * n, rec.end - r.pos, len + 6);
+    // Arrays carry a 6-byte header (count, allocated, element size); the property value is the byte
+    // length of the data in current files. Strings (WordArt text and font names) have no header, so
+    // the slice always covers at least the declared length.
+    const total = Math.min(Math.max(6 + entry * n, len), rec.end - r.pos);
     complex.set(id, r.b.slice(r.pos, r.pos + total));
-    r.seek(r.pos + Math.max(total, len));
+    r.seek(r.pos + total);
   }
   return { props, complex };
 }

@@ -8,6 +8,7 @@
  */
 import { Reader, emuPt } from './cfbStreams';
 import type { LDoc, LPage, LShape } from './shapes';
+import type { TableInfo } from './contents';
 import type { QuillInfo, QPara, CharStyle } from './quill';
 import type { Fill } from '../../model/types';
 import { colorOf } from './text';
@@ -44,7 +45,36 @@ function lineWidth2k(w: number): number {
 
 const SHAPES_2K: Record<number, number> = { 0x1: 6, 0x3: 68, 0x4: 12, 0x5: 74, 0x6: 5, 0x7: 7, 0x9: 70, 0xa: 59, 0xb: 64, 0xc: 4, 0xd: 8, 0xe: 55, 0xf: 91, 0x10: 92, 0x12: 56, 0x13: 15, 0x15: 101, 0x16: 71, 0x18: 9, 0x1c: 72, 0x1d: 95, 0x1e: 10, 0x1f: 11, 0x20: 16, 0x22: 73 };
 
-interface Layout97 { textIdOffset: number; textMarker: number; firstLine: number; secondLine: number; fillType: number; fillColor: number; coordOffset: number }
+interface Layout97 { textIdOffset: number; textMarker: number; firstLine: number; secondLine: number; fillType: number; fillColor: number; coordOffset: number; /** Byte shift of every field after the marker (-2 for 97 records without the rotation word). */ shift: number }
+
+/** Chunk markers that are shapes (text boxes 0x08 in 2000, 0x00 in 97; tables 0x0a in 2000). */
+const SHAPE_MARKERS = new Set([0x0000, 0x0002, 0x0004, 0x0005, 0x0006, 0x0007, 0x0008, 0x000a, 0x000f]);
+
+/**
+ * A Publisher 2000 table record (marker 0x0a): the text id at 0x4e, the column count at 0x50, the
+ * number of size entries at 0x74 and, from 0x7e, (end, size) EMU pairs for the columns then the rows.
+ * The cell spans sit in a child chunk (marker 0x4f): a count at 0x0a and 11-byte entries from 0x14,
+ * each a border style index, first row, last row, first column, last column, a flag and an inset.
+ */
+function table2k(r: Reader, c: Chunk, chunks: Chunk[]): TableInfo | null {
+  const o = c.offset;
+  const cols = r.u16At(o + 0x50), total = r.u16At(o + 0x74);
+  const rows = total - cols;
+  if (cols < 1 || rows < 1 || cols > 256 || rows > 4096 || o + 0x7e + total * 8 > c.end) return null;
+  const colWidths: number[] = [], rowHeights: number[] = [];
+  for (let i = 0; i < total; i++) { const size = r.u32At(o + 0x7e + i * 8 + 4); (i < cols ? colWidths : rowHeights).push(size); }
+  const cells: TableInfo['cells'] = [];
+  const cc = chunks.find((k) => k.parent === c.seq && k.marker === 0x004f);
+  if (cc) {
+    const n = Math.min(r.u16At(cc.offset + 0x0a), Math.floor((cc.end - cc.offset - 0x14) / 11));
+    for (let i = 0; i < n; i++) {
+      const e = cc.offset + 0x14 + i * 11;
+      const r0 = r.u8At(e + 2), r1 = r.u8At(e + 3), c0 = r.u8At(e + 4), c1 = r.u8At(e + 5);
+      if (r0 < rows && c0 < cols) cells.push({ r0, r1: Math.min(Math.max(r1, r0), rows - 1), c0, c1: Math.min(Math.max(c1, c0), cols - 1) });
+    }
+  }
+  return { rows, cols, rowHeights, colWidths, cells };
+}
 
 function readChunks(r: Reader): Chunk[] {
   const trailer = r.u32At(0x16);
@@ -61,40 +91,54 @@ function readChunks(r: Reader): Chunk[] {
   return out;
 }
 
-function shapeOf(r: Reader, c: Chunk, chunks: Chunk[], palette: number[], names: Map<number, string>, L: Layout97, pictures: number[], counts: LDoc['counts'], depth: number): LShape | null {
+function shapeOf(r: Reader, c: Chunk, chunks: Chunk[], palette: number[], names: Map<number, string>, L: Layout97, pictures: number[], counts: LDoc['counts'], depth: number, textShapes: LShape[]): LShape | null {
   if (depth > 32) return null;
-  const o = c.offset;
+  const o = c.offset, sh = L.shift;
   const s: LShape = { seq: c.seq, kind: c.marker === 0x000f ? 'group' : 'shape', type: 1 };
   let flagsOffset = 0, isRect = false, isLine = false, isImage = false;
   switch (c.marker) {
     case 0x000f: break;
+    case 0x000a: {
+      if (L.textMarker !== 0x0008) break;
+      const t = table2k(r, c, chunks);
+      if (!t) break;
+      s.kind = 'table'; s.table = t; s.textId = r.u16At(o + 0x4e); s.defaultTableBorder = true; isRect = true;
+      break;
+    }
     case 0x0004: isLine = true; flagsOffset = 0x41; s.type = 20; break;
     case 0x0002: isImage = true; isRect = true; break;
     case 0x0005: isRect = true; break;
     case 0x0006: { const t = SHAPES_2K[r.u8At(o + 0x31)]; flagsOffset = 0x33; if (t) s.type = t; else counts.unknownShapes++; break; }
     case 0x0007: s.type = 3; break;
     default:
-      if (c.marker === L.textMarker) { isRect = true; s.textId = r.u16At(o + L.textIdOffset); }
+      if (c.marker === L.textMarker) {
+        isRect = true;
+        // Some 97 files keep shorter records than the text id offset; those get their text by order.
+        if (o + L.textIdOffset + sh + 2 <= c.end) s.textId = r.u16At(o + L.textIdOffset + sh);
+        textShapes.push(s);
+      }
       break;
   }
-  if (s.kind !== 'group' && !isLine) { const rot = (360 - r.u16At(o + 4) / 10) % 360; if (Math.abs(rot) > 0.01 && Math.abs(rot - 360) > 0.01) s.rot = Math.round(rot * 100) / 100; }
-  const xs = r.i32At(o + 6) - L.coordOffset, ys = r.i32At(o + 10) - L.coordOffset, xe = r.i32At(o + 14) - L.coordOffset, ye = r.i32At(o + 18) - L.coordOffset;
+  if (s.kind !== 'group' && !isLine && sh === 0) { const rot = (360 - r.u16At(o + 4) / 10) % 360; if (Math.abs(rot) > 0.01 && Math.abs(rot - 360) > 0.01) s.rot = Math.round(rot * 100) / 100; }
+  const xs = r.i32At(o + 6 + sh) - L.coordOffset, ys = r.i32At(o + 10 + sh) - L.coordOffset, xe = r.i32At(o + 14 + sh) - L.coordOffset, ye = r.i32At(o + 18 + sh) - L.coordOffset;
   s.box = { xs: Math.min(xs, xe), ys: Math.min(ys, ye), xe: Math.max(xs, xe), ye: Math.max(ys, ye) };
-  if (flagsOffset) { const f = r.u8At(o + flagsOffset); if (f & 0x1) s.flipV = true; if (f & (0x2 | 0x10)) s.flipH = true; }
+  // Template placeholders have an empty box; they draw nothing.
+  if (s.kind !== 'group' && s.box.xs === s.box.xe && s.box.ys === s.box.ye) return null;
+  if (flagsOffset) { const f = r.u8At(o + flagsOffset + sh); if (f & 0x1) s.flipV = true; if (f & (0x2 | 0x10)) s.flipH = true; }
   if (s.kind === 'group') {
-    s.children = chunks.filter((k) => k.parent === c.seq && k !== c && (k.marker === 0x000f || k.marker === 0x0002 || (k.marker >= 0x0004 && k.marker <= 0x0008) || k.marker === 0x0000))
-      .map((k) => shapeOf(r, k, chunks, palette, names, L, pictures, counts, depth + 1)).filter((k): k is LShape => !!k);
+    s.children = chunks.filter((k) => k.parent === c.seq && k !== c && SHAPE_MARKERS.has(k.marker))
+      .map((k) => shapeOf(r, k, chunks, palette, names, L, pictures, counts, depth + 1, textShapes)).filter((k): k is LShape => !!k);
     return s;
   }
   if (isImage) {
     const idx = pictures.indexOf(c.seq);
     if (idx >= 0) s.picture = idx + 1;
-  } else if (r.u8At(o + L.fillType) === 2) {
-    s.fill = { type: 'solid', color: colorOf(colorRef2k(r.u32At(o + L.fillColor)), palette, names) } as Fill;
+  } else if (r.u8At(o + L.fillType + sh) === 2) {
+    s.fill = { type: 'solid', color: colorOf(colorRef2k(r.u32At(o + L.fillColor + sh)), palette, names) } as Fill;
   }
   // Strokes: the left line, and for rectangles the top/right/bottom lines; the first that exists is used.
-  const sides: { w: number; c: number }[] = [{ w: r.u8At(o + L.firstLine), c: r.u32At(o + L.firstLine + 1) }];
-  if (isRect) for (let i = 0; i < 3; i++) { const p = o + L.secondLine + i * 6; sides.unshift({ w: r.u8At(p), c: r.u32At(p + 1) }); }
+  const sides: { w: number; c: number }[] = [{ w: r.u8At(o + L.firstLine + sh), c: r.u32At(o + L.firstLine + sh + 1) }];
+  if (isRect) for (let i = 0; i < 3; i++) { const p = o + L.secondLine + sh + i * 6; sides.unshift({ w: r.u8At(p), c: r.u32At(p + 1) }); }
   const side = sides.find((x) => x.w !== 0);
   if (side) s.line = { color: colorOf(colorRef2k(side.c), palette, names), width: Math.max(0.25, lineWidth2k(side.w)) };
   s.insets = [emuPt(36576), emuPt(36576), emuPt(36576), emuPt(36576)];
@@ -116,13 +160,17 @@ export function parse2k(contents: Uint8Array, quill: QuillInfo | null, version: 
   else { width = r.u32At(docChunk.offset + 0x14); height = r.u32At(docChunk.offset + 0x18); }
   if (!width || !height) throw new Error('Contents has no page size');
   const L: Layout97 = doc97
-    ? { textIdOffset: 0x46, textMarker: 0x0000, firstLine: 0x22, secondLine: 0x2d, fillType: 0x20, fillColor: 0x18, coordOffset: (banner ? 120 : 25) * 914400 }
-    : { textIdOffset: 0x58, textMarker: 0x0008, firstLine: 0x2c, secondLine: 0x35, fillType: 0x2a, fillColor: 0x22, coordOffset: 0 };
+    ? { textIdOffset: 0x46, textMarker: 0x0000, firstLine: 0x22, secondLine: 0x2d, fillType: 0x20, fillColor: 0x18, coordOffset: (banner ? 120 : 25) * 914400, shift: 0 }
+    : { textIdOffset: 0x58, textMarker: 0x0008, firstLine: 0x2c, secondLine: 0x35, fillType: 0x2a, fillColor: 0x22, coordOffset: 0, shift: 0 };
+  // Some 97 files write shape records without the rotation word, so the coordinates start at +4.
+  // A rotation above 360° in any shape record gives that variant away.
+  if (doc97 && chunks.some((c) => SHAPE_MARKERS.has(c.marker) && c.marker !== 0x000f && c.marker !== 0x0004 && r.u16At(c.offset + 4) > 3600)) L.shift = -2;
   const palette: number[] = [];
   for (const c of chunks) if (c.marker === 0x0047) for (let j = 0; j < 8; j++) palette.push(color2k(r.u32At(c.offset + 0xa0 + j * 4)));
   const names = new Map<number, string>();
   palette.forEach((_c, i) => names.set(i, `Scheme Color ${i + 1}`));
-  const counts = { unknownShapes: 0, borderArt: 0, calcGeometry: 0, unplaced: 0, scratch: 0 };
+  const counts = { unknownShapes: 0, borderArt: 0, calcGeometry: 0, unplaced: 0, scratch: 0, wordArt: 0 };
+  const textShapes: LShape[] = [];
   // Image data chunks hold Windows metafiles; they are counted so the frames can say what is missing.
   const imageData = chunks.filter((c) => c.marker === 0x0021);
   const pictures = imageData.map((c) => c.parent);
@@ -132,15 +180,28 @@ export function parse2k(contents: Uint8Array, quill: QuillInfo | null, version: 
     const pg: LPage = { seq: pc.seq, shapes: [], isMaster: pc.seq === MASTER_SEQ };
     for (const c of chunks) {
       if (c.parent !== pc.seq || c === pc) continue;
-      if (!(c.marker === 0x000f || c.marker === 0x0002 || (c.marker >= 0x0004 && c.marker <= 0x0008) || c.marker === 0x0000)) continue;
-      const s = shapeOf(r, c, chunks, palette, names, L, pictures, counts, 0);
+      if (!SHAPE_MARKERS.has(c.marker)) continue;
+      const s = shapeOf(r, c, chunks, palette, names, L, pictures, counts, 0, textShapes);
       if (s) pg.shapes.push(s);
     }
     pages.push(pg);
   }
+  // Page chunks also describe scratch and template areas; as in the reference reader, only the pages
+  // that carry objects become pages (a publication keeps at least its first page).
+  const withShapes = pages.filter((p) => p.isMaster || p.shapes.length);
+  const kept = withShapes.some((p) => !p.isMaster) ? withShapes : pages.slice(0, 1);
+  pages.length = 0; pages.push(...kept);
   const master = pages.find((p) => p.isMaster);
   if (master) for (const p of pages) if (!p.isMaster) p.master = master.seq;
   const q = doc97 ? parseText97(r, palette) : quill ? remapQuillColors(quill) : null;
+  // Publisher 97 stories are numbered by their order in the text; when the records carry no usable
+  // ids (short records, ids beyond the story count), the text boxes take the stories in page order.
+  if (doc97 && q) {
+    const n = q.texts.size;
+    const onPages = textShapes.filter((t) => pages.some((p) => !p.isMaster && p.shapes.includes(t)));
+    const valid = onPages.length > 0 && onPages.every((t) => t.textId != null && t.textId < n);
+    if (!valid) onPages.forEach((t, i) => { t.textId = i < n ? i : undefined; });
+  }
   const doc: LDoc = {
     version, width, height, pages: [...pages.filter((p) => !p.isMaster), ...pages.filter((p) => p.isMaster)], quill: q, palette,
     pictures: imageData.map((c) => ({ kind: 'wmf' as const, mime: 'image/wmf', data: r.b.slice(c.offset + 8, Math.min(c.end, c.offset + 8 + r.u32At(c.offset + 4))) })),
@@ -157,6 +218,21 @@ function remapQuillColors(q: QuillInfo): QuillInfo {
   for (const paras of q.texts.values()) for (const p of paras) for (const s of p.spans) fix(s.style);
   for (const st of q.defaultChar) fix(st);
   return { ...q, colors: refs };
+}
+
+/**
+ * Publisher 97 text is 8-bit in the writer's Windows code page, which the file does not record.
+ * Western text keeps high bytes rare; when most letters are high bytes the text is in another
+ * script, and a run of bytes confined to 0xC0–0xFF is the Cyrillic block of code page 1251.
+ */
+function guessCodePage(chars: Uint8Array): string {
+  let letters = 0, high = 0, cyr = 0;
+  for (const c of chars) {
+    if ((c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)) letters++;
+    else if (c >= 0x80) { high++; if (c >= 0xc0 || c === 0xa8 || c === 0xb8) cyr++; }
+  }
+  if (high && high / (letters + high) > 0.3) return cyr / high > 0.9 ? 'windows-1251' : 'windows-1250';
+  return 'windows-1252';
 }
 
 /** Publisher 97: 8-bit text and the character formatting pages of the Contents stream. */
@@ -206,9 +282,9 @@ function parseText97(r: Reader, _palette: number[]): QuillInfo {
   }
   // Text: paragraphs end at CR LF, shapes at form feed.
   const end = Math.min(textEnd, r.length);
-  let dec: TextDecoder | null = null;
-  try { dec = new TextDecoder('windows-1252'); } catch { dec = null; }
   const chars = r.b.subarray(textStart, end);
+  let dec: TextDecoder | null = null;
+  try { dec = new TextDecoder(guessCodePage(chars)); } catch { dec = null; }
   const decode = (a: number, b: number) => (dec ? dec.decode(chars.subarray(a, b)) : String.fromCharCode(...chars.subarray(a, b)));
   let shape = 0, paraStart = 0, si = 0, spanStart = 0;
   let paras: QPara[] = [];

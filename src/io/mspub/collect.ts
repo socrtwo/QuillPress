@@ -7,7 +7,7 @@ import { Pub, newId } from '../../model/pub';
 import type { Item, TextFrame, PictureFrame, ShapeItem, LineItem, GroupItem, TableItem, TableCell, Paragraph, Master, Page, Fill, Line, Story } from '../../model/types';
 import { b64 } from '../xml';
 import type { LDoc, LShape, LPage } from './shapes';
-import { storyParagraphs, paraByteLength, hex, type TextEnv } from './text';
+import { storyParagraphs, hex, type TextEnv } from './text';
 import type { QPara } from './quill';
 
 /** Office Art shape type numbers → QuillPress preset geometry names. */
@@ -20,6 +20,12 @@ const PRESETS: Record<number, string> = {
   183: 'sun', 184: 'moon', 185: 'bracketPair', 186: 'bracePair', 187: 'star4', 188: 'wave', 189: 'actionButtonBlank', 190: 'actionButtonHome', 193: 'actionButtonForwardNext', 194: 'actionButtonBackPrevious', 195: 'actionButtonEnd', 196: 'actionButtonBeginning', 197: 'actionButtonReturn', 202: 'rect',
 };
 const LINE_TYPES = new Set([20, 32]);
+/** Office Art shape types without an exact preset, drawn with the nearest one (counted in a warning). */
+const APPROX: Record<number, string> = {
+  89: 'upArrow', 90: 'upArrow', 91: 'rightArrow', 102: 'rightArrow', 103: 'leftArrow', 104: 'upArrow', 105: 'downArrow', 106: 'cloudCallout', 107: 'ribbon2', 108: 'ribbon2',
+  113: 'flowChartProcess', 115: 'flowChartDocument', 122: 'wave', 123: 'ellipse', 124: 'ellipse', 125: 'flowChartSort', 130: 'ellipse', 131: 'ellipse', 133: 'can', 134: 'flowChartDocument',
+  178: 'leftRightArrow', 179: 'leftRightArrow', 180: 'wave', 181: 'ellipse', 182: 'quadArrow', 191: 'actionButtonBlank', 192: 'actionButtonBlank', 198: 'actionButtonBlank', 199: 'actionButtonBlank', 200: 'actionButtonBlank',
+};
 
 interface Env {
   pub: Pub;
@@ -32,7 +38,7 @@ interface Env {
   /** Text frames by Quill text id, in placement order (for chains). */
   frames: Map<number, TextFrame[]>;
   stories: Map<number, Story>;
-  counts: { unknownShapes: number; metafiles: number; emptyBoxes: number };
+  counts: { unknownShapes: number; metafiles: number; emptyBoxes: number; approxShapes: number; tableBorders: number };
 }
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
@@ -106,11 +112,13 @@ function tableCells(env: Env, s: LShape, paras: QPara[] | undefined): TableItem[
     const ends = s.textId != null ? env.doc.quill?.cellEnds.get(s.textId) : undefined;
     const perCell: QPara[][] = anchors.map(() => []);
     if (ends?.length) {
-      let bytes = 0, ci = 0;
+      // The cell ends are character offsets into the story (counted from 1, each paragraph including
+      // its return); a cell closes with the paragraph that reaches its end.
+      let offset = 1, ci = 0;
       for (const p of paras) {
-        bytes += paraByteLength(p);
-        while (ci < ends.length - 1 && bytes > ends[ci]) ci++;
+        offset += p.spans.reduce((a, sp) => a + sp.text.length, 0);
         perCell[Math.min(ci, perCell.length - 1)].push(p);
+        if (ci < ends.length && offset >= ends[ci]) ci++;
       }
     } else perCell[0].push(...paras);
     perCell.forEach((ps, i) => { if (ps.length) grid[anchors[i].r][anchors[i].c].text = storyParagraphs(ps, env.text!); });
@@ -136,10 +144,26 @@ function convert(env: Env, s: LShape, parent?: { x: number; y: number }): Item |
     const t: TableItem = { ...common(env, s, box, newId('tb')), kind: 'table', cols: s.table.colWidths.map((w) => r2(w / 12700)), rows: tableCells(env, s, paras) } as TableItem;
     const line = lineProp(s);
     if (line) { t.border = line; t.innerBorder = { ...line }; }
+    else if (s.defaultTableBorder) { t.border = { fill: { type: 'solid', color: 'Black' }, width: 0.5 }; t.innerBorder = { fill: { type: 'solid', color: 'Black' }, width: 0.5 }; env.counts.tableBorders++; }
     delete (t as any).line;
     return t;
   }
   const media = s.picture ? mediaOf(env, s.picture) : undefined;
+  if (s.wordArt && s.textId == null) {
+    // WordArt: one centred paragraph in the shape's fill colour, sized so the lines fill the box.
+    const wa = s.wordArt;
+    const lines = wa.text.split('\n');
+    // Fit the lines in the box: by height, and by width at an average glyph width of 0.55 em.
+    const longest = Math.max(1, ...lines.map((l) => l.length));
+    const size = r2(Math.max(4, Math.min(wa.size * 4, (box.h * 0.78) / Math.max(1, lines.length), box.w / (0.55 * longest))));
+    const color = s.fill?.type === 'solid' ? s.fill.color : s.fill?.type === 'gradient' ? s.fill.stops[0].color : 'Black';
+    const runs: Paragraph['runs'] = [];
+    lines.forEach((ln, i) => { runs.push({ text: ln, size, color, ...(wa.font ? { font: wa.font } : {}), ...(wa.bold ? { b: true } : {}), ...(wa.italic ? { i: true } : {}) }); if (i < lines.length - 1) runs.push({ text: '\n', br: true, size }); });
+    const story = env.pub.newStory([{ style: 'Body', align: 'ctr', lineSpacing: 100, spaceBefore: 0, spaceAfter: 0, runs }]);
+    const f: TextFrame = { ...common(env, s, box, newId('tf')), kind: 'text', story: story.id, insets: [0, 0, 0, 0], anchor: 'ctr' } as TextFrame;
+    delete (f as any).fill; delete (f as any).line;
+    return f;
+  }
   if (s.textId != null && !(s.picture && media)) {
     const story = env.stories.get(s.textId) || env.pub.newStory(paras && env.text ? storyParagraphs(paras, env.text) : [{ style: 'Body', runs: [] }]);
     env.stories.set(s.textId, story);
@@ -167,7 +191,8 @@ function convert(env: Env, s: LShape, parent?: { x: number; y: number }): Item |
     if (!l.line) l.line = { fill: { type: 'solid', color: 'Black' }, width: 0.75 };
     return l;
   }
-  const preset = PRESETS[s.type];
+  let preset = PRESETS[s.type];
+  if (!preset && !s.custom && APPROX[s.type]) { preset = APPROX[s.type]; env.counts.approxShapes++; }
   if (!preset && !s.custom) env.counts.unknownShapes++;
   const sh: ShapeItem = { ...common(env, s, box, newId('sh')), kind: 'shape', geom: s.custom ? 'custom' : preset || 'rect' } as ShapeItem;
   if (s.custom) sh.path = [{ d: s.custom.d, w: s.custom.w, h: s.custom.h }];
@@ -206,7 +231,7 @@ export function collectPub(doc: LDoc, name: string): CollectResult {
   });
   const env: Env = {
     pub, doc, media: new Map(), skippedPictures: new Set(), frames: new Map(), stories: new Map(),
-    counts: { unknownShapes: 0, metafiles: 0, emptyBoxes: 0 },
+    counts: { unknownShapes: 0, metafiles: 0, emptyBoxes: 0, approxShapes: 0, tableBorders: 0 },
     text: doc.quill ? { quill: doc.quill, palette: doc.palette, paletteNames, dropped: { fields: 0 } } : null,
   };
   // Master pages.
@@ -236,6 +261,9 @@ export function collectPub(doc: LDoc, name: string): CollectResult {
   const items = P.pages.reduce((a, p) => a + p.items.length, 0) + P.masters.reduce((a, m) => a + m.items.length, 0);
   w.unshift(`Microsoft Publisher ${doc.version}: ${P.pages.length} page${P.pages.length === 1 ? '' : 's'}${masters.length ? ` and ${masters.length} master page${masters.length === 1 ? '' : 's'}` : ''} with ${items} object${items === 1 ? '' : 's'} and ${P.stories.length} stor${P.stories.length === 1 ? 'y' : 'ies'} were read with their layout.`);
   if (env.counts.metafiles) w.push(`${env.counts.metafiles} picture${env.counts.metafiles === 1 ? ' is a Windows metafile (WMF/EMF) and was' : 's are Windows metafiles (WMF/EMF) and were'} left as empty frames; convert them to PNG and place them again.`);
+  if (env.counts.approxShapes) w.push(`${env.counts.approxShapes} shape${env.counts.approxShapes === 1 ? ' was' : 's were'} drawn with the closest preset QuillPress has (curved arrows, callouts and flowchart symbols are approximate).`);
+  if (doc.counts.wordArt) w.push(`${doc.counts.wordArt} WordArt object${doc.counts.wordArt === 1 ? ' was' : 's were'} placed as plain text in its colour; the warp, outline and shadow effects are not reproduced.`);
+  if (env.counts.tableBorders) w.push(`${env.counts.tableBorders} table${env.counts.tableBorders === 1 ? '' : 's'} from Publisher 2000 got a plain hairline grid; its cell borders and fills are not read.`);
   if (env.counts.unknownShapes) w.push(`${env.counts.unknownShapes} shape${env.counts.unknownShapes === 1 ? '' : 's'} of a kind QuillPress has no preset for were placed as rectangles.`);
   if (doc.counts.borderArt) w.push(`Decorative borders (Border Art) on ${doc.counts.borderArt} object${doc.counts.borderArt === 1 ? '' : 's'} were not read; plain outlines were kept.`);
   if (doc.counts.calcGeometry) w.push(`${doc.counts.calcGeometry} custom shape${doc.counts.calcGeometry === 1 ? ' uses' : 's use'} computed geometry points; the outline is approximate.`);

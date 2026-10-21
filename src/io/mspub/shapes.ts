@@ -9,7 +9,7 @@ import type { ContentsInfo, TableInfo } from './contents';
 import type { EscherInfo, EscherShape, DelayPicture } from './escher';
 import { customPath, parseVertices, parseSegments } from './escher';
 import type { QuillInfo } from './quill';
-import { emuPt, fixed16 } from './cfbStreams';
+import { emuPt, fixed16, utf16Of } from './cfbStreams';
 import { colorOf } from './text';
 
 export interface LLine { color: Color; width: number; dash?: Dash; head?: ArrowEnd; tail?: ArrowEnd; cap?: 'flat' | 'round' | 'square' }
@@ -48,6 +48,10 @@ export interface LShape {
   alt?: boolean;
   /** Source file name of a placed picture. */
   pictureName?: string;
+  /** Publisher 2000 tables carry no readable border styles; draw a plain grid. */
+  defaultTableBorder?: boolean;
+  /** WordArt (Office Art text shapes 136–175): the text, its font and the requested size in points. */
+  wordArt?: { text: string; font?: string; size: number; bold?: boolean; italic?: boolean };
 }
 
 export interface LPage { seq: number; shapes: LShape[]; bg?: Fill; isMaster: boolean; master?: number }
@@ -63,7 +67,7 @@ export interface LDoc {
   pictures: DelayPicture[];
   palette: number[];
   embeddedFonts: number;
-  counts: { unknownShapes: number; borderArt: number; calcGeometry: number; unplaced: number; scratch: number };
+  counts: { unknownShapes: number; borderArt: number; calcGeometry: number; unplaced: number; scratch: number; wordArt: number };
   warnings: string[];
 }
 
@@ -170,13 +174,25 @@ function convertShape(es: EscherShape, contents: ContentsInfo, delay: number[], 
     if (path.d) s.custom = { d: path.d, w: p.get(0x0142) ?? 21600, h: p.get(0x0143) ?? 21600 };
   }
   if (es.complex.has(0xc383)) s.wrap = true;
+  // WordArt: the text lives in the shape's own properties (gtextUNICODE 0x00c0, gtextFont 0x00c5,
+  // gtextSize 0x00c1 in 16.16 points, gtextFlags 0x00ff: bold bit 5, italic bit 4).
+  const gtext = es.complex.get(0xc0c0);
+  if (es.type >= 136 && es.type <= 175 && gtext) {
+    const text = utf16Of(gtext).replace(/\r\n?/g, '\n').replace(/\n+$/, '');
+    if (text) {
+      const fontBytes = es.complex.get(0xc0c5);
+      const flags = p.get(0x00ff) ?? 0;
+      s.wordArt = { text, font: fontBytes ? utf16Of(fontBytes) || undefined : undefined, size: p.has(0x00c1) ? fixed16(p.get(0x00c1)!) : 36, bold: !!(flags & (1 << 5)), italic: !!(flags & (1 << 4)) };
+      counts.wordArt++;
+    }
+  }
   if (es.children) s.children = es.children.map((c) => convertShape(c, contents, delay, pictures, names, counts));
   return s;
 }
 
 /** Builds the layout document of a 2002+ publication. */
 export function buildLayout(contents: ContentsInfo, quill: QuillInfo | null, escher: EscherInfo, pictures: DelayPicture[], version: string): LDoc {
-  const counts = { unknownShapes: 0, borderArt: 0, calcGeometry: 0, unplaced: 0, scratch: 0 };
+  const counts = { unknownShapes: 0, borderArt: 0, calcGeometry: 0, unplaced: 0, scratch: 0, wordArt: 0 };
   const names = new Map<number, string>();
   contents.palette.forEach((_c, i) => names.set(i, `Scheme Color ${i + 1}`));
   const doc: LDoc = { version, width: contents.width, height: contents.height, pages: [], quill, pictures, palette: contents.palette, embeddedFonts: contents.fonts.filter((f) => f.eot).length, counts, warnings: [...contents.warnings] };

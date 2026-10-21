@@ -105,16 +105,26 @@ async function harvest(data: Uint8Array, name: string, why: string | null): Prom
     for (const p of escherBlips(bytes)) push(p);
   }
   if (!pics.length) for (const p of await picturesFrom(cfb.entries.filter((e) => e.type === 'stream').map((e) => cfb.read(e)!).filter(Boolean))) push(p);
-  if (!paras.length && !pics.length) throw new Error('No readable text or pictures were found in this Publisher file.');
   const pub = await buildPublication(name, paras, pics, warnings);
+  if (!paras.length && !pics.length) warnings.push('No readable text or pictures were found in this Publisher file.');
   if (cfb.damaged.length) warnings.push(`Parts of the compound file were damaged (${cfb.damaged.slice(0, 3).join(', ')}); what could be read was used.`);
   warnings.unshift(`Microsoft Publisher: the text (${paras.reduce((a, p) => a + p.runs[0].text.split(/\s+/).length, 0)} words${quill ? ', from the Quill stream' : ''}) and ${pics.length} picture${pics.length === 1 ? '' : 's'} were recovered and placed on new pages${why ? ` because the layout could not be read (${why})` : ''}; redo the layout here or save the result as .qpp.`);
   return { pub, warnings, textOnly: true };
 }
 
+/** A file whose compound-file structure is unreadable: text runs and pictures from the raw bytes. */
+async function harvestRaw(data: Uint8Array, name: string): Promise<LegacyImport> {
+  const warnings: string[] = [];
+  const paras = paragraphsFrom(utf16Runs(data, 6), 0.55);
+  const pics = await picturesFrom([data]);
+  const pub = await buildPublication(name, paras, pics, warnings);
+  warnings.unshift(`Microsoft Publisher: the file's compound-file structure could not be read (it is damaged or not a Publisher file); ${paras.length ? `${paras.length} text passage${paras.length === 1 ? '' : 's'}` : 'no text'} and ${pics.length} picture${pics.length === 1 ? '' : 's'} were recovered from the raw bytes.`);
+  return { pub, warnings, textOnly: true };
+}
+
 export async function importMsPub(data: Uint8Array, name: string): Promise<LegacyImport> {
   const st = openPubStreams(data);
-  if (!st) throw new Error('Not a Publisher file (the compound file could not be read).');
+  if (!st) return harvestRaw(data, name);
   let why: string | null = null;
   if (st.version !== 'unknown') {
     try {

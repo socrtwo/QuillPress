@@ -73,9 +73,11 @@ function paraProps(st: ParaStyle, def: ParaStyle): Partial<Paragraph> {
     if (ls.lineSpacingPt) { p.lineSpacing = Math.round(ls.lineSpacing * 100) / 100; p.lineSpacingPt = true; }
     else if (Math.abs(ls.lineSpacing - 1) > 0.001) p.lineSpacing = Math.round(ls.lineSpacing * 1000) / 10;
   }
+  // Publisher paragraphs have no space before or after unless the file says so (the Body style's own
+  // spacing must not creep in).
   const sb = st.spaceBefore ?? def.spaceBefore, sa = st.spaceAfter ?? def.spaceAfter;
-  if (sb) p.spaceBefore = emuPt(sb);
-  if (sa) p.spaceAfter = emuPt(sa);
+  p.spaceBefore = sb ? emuPt(sb) : 0;
+  p.spaceAfter = sa ? emuPt(sa) : 0;
   const fi = st.firstIndent ?? def.firstIndent, li = st.leftIndent ?? def.leftIndent, ri = st.rightIndent ?? def.rightIndent;
   if (fi) p.indent = emuPt(fi);
   if (li) p.marL = emuPt(li);

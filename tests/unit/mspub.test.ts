@@ -160,7 +160,8 @@ function quill2002(): Uint8Array {
   const stsh2 = new Buf().u32(0).u32(2).pad(12).u32(8).u32(8 + 2 + defChar.length).u16(0).bytes(defChar).u16(0).bytes(defPara).out();
   const font = new Buf().u32(0).u32(2).pad(12 + 8).u16('Georgia'.length).utf16('Georgia').u32(0).u16('Verdana'.length).utf16('Verdana').u32(0).out();
   // Table cell ends: byte offsets of the end of each cell's text inside story 3.
-  const tcd = new Buf().u32(3).pad(8).u32(4).u32(10).u32(16).u32(24).out();
+  // Cell ends are character offsets of each cell's last return (the file omits that return: +2 when read).
+  const tcd = new Buf().u32(3).pad(8).u32(2).u32(5).u32(8).u32(12).out();
   const chunks: QChunk[] = [
     { name: 'TEXT', id: 0, data: text }, { name: 'STRS', id: 0, data: strs }, { name: 'SYID', id: 0, data: syid }, { name: 'PL  ', id: 0, data: colors },
     { name: 'FDPC', id: 0, data: fdpc }, { name: 'FDPP', id: 0, data: fdpp }, { name: 'STSH', id: 0, data: new Uint8Array(8) }, { name: 'STSH', id: 1, data: stsh2 },
