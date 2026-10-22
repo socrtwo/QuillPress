@@ -7,7 +7,7 @@ import type { Pub } from '../model/pub';
 import type { Item, Page, Master, TextFrame, Paragraph, RunProps, Story } from '../model/types';
 import { DEFAULT_FOOTNOTE_OPTIONS } from '../model/types';
 import { resolvePara, resolveRun } from '../model/styles';
-import { layoutStory, baselineShift, type FlowBox, type LayoutResult, type Rect, type LaidLine, type AnchoredInfo } from './text';
+import { layoutStory, segRaise, type FlowBox, type LayoutResult, type Rect, type LaidLine, type AnchoredInfo } from './text';
 import { fontFamilyCss } from '../fonts';
 
 export interface FrameLayout { frame: TextFrame; lines: LaidLine[]; boxes: FlowBox[]; overset: boolean; separators: { x: number; y: number; w: number }[]; rules: LayoutResult['rules'] }
@@ -237,7 +237,7 @@ export function frameClipHeight(f: TextFrame, lines: LaidLine[]): number {
   if (f.autosize !== 'height') return f.h;
   const ins = f.insets || [4, 4, 4, 4];
   let bottom = f.y + f.h - ins[3];
-  for (const l of lines) bottom = Math.max(bottom, l.y + Math.max(0, l.height - l.ascent) + Math.max(0, ...l.segs.map((sg) => -baselineShift(sg.style.baseline, sg.size))));
+  for (const l of lines) bottom = Math.max(bottom, l.y + Math.max(0, l.height - l.ascent) + Math.max(0, ...l.segs.map((sg) => -segRaise(sg.style, sg.size))));
   return Math.max(f.h, bottom - f.y + ins[3]);
 }
 

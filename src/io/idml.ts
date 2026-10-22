@@ -55,9 +55,21 @@ function geometryOf(el: Element): Geometry | null {
 }
 
 /** Box of a geometry under a transform: an axis-aligned box plus a rotation when the transform rotates. */
-function boxOf(g: Geometry, m: Matrix): { x: number; y: number; w: number; h: number; rot?: number } {
+function boxOf(g: Geometry, m: Matrix): { x: number; y: number; w: number; h: number; rot?: number; skew?: number } {
   const angle = Math.atan2(m.b, m.a);
-  const sx = Math.hypot(m.a, m.b) || 1, sy = Math.hypot(m.c, m.d) || 1;
+  const sx = Math.hypot(m.a, m.b) || 1;
+  // The second column in the rotated frame gives the vertical scale and the horizontal skew.
+  const cs = Math.cos(angle), sn = Math.sin(angle);
+  const cr = cs * m.c + sn * m.d, dr = -sn * m.c + cs * m.d;
+  const k = Math.abs(dr) > 1e-9 ? cr / dr : 0;
+  const skewDeg = Math.abs(k) > 1e-4 ? (Math.atan(-k) * 180) / Math.PI : 0;
+  const sy = skewDeg ? Math.abs(dr) || 1 : Math.hypot(m.c, m.d) || 1;
+  if (skewDeg) {
+    const c = apply(m, g.bounds.x + g.bounds.w / 2, g.bounds.y + g.bounds.h / 2);
+    const w = g.bounds.w * sx, h = g.bounds.h * sy;
+    const rot = ((angle * 180) / Math.PI + 360) % 360;
+    return { x: c.x - w / 2, y: c.y - h / 2, w, h, ...(Math.abs(angle) > 1e-4 ? { rot } : {}), skew: Math.round(skewDeg * 100) / 100 };
+  }
   if (Math.abs(angle) < 1e-4) {
     const tl = apply(m, g.bounds.x, g.bounds.y), br = apply(m, g.bounds.x + g.bounds.w, g.bounds.y + g.bounds.h);
     return { x: Math.min(tl.x, br.x), y: Math.min(tl.y, br.y), w: Math.abs(br.x - tl.x), h: Math.abs(br.y - tl.y) };
@@ -101,7 +113,7 @@ async function pictureFrame(env: Env, el: Element, m: Matrix, g: Geometry): Prom
   const img = kids(el).find((k) => ['Image', 'PDF', 'EPS', 'ImportedPage', 'PICT', 'WMF', 'Graphic'].includes(k.localName));
   if (!img) return null;
   const box = boxOf(g, m);
-  const pf: PictureFrame = { id: newId('pic'), kind: 'picture', x: r2(box.x), y: r2(box.y), w: r2(box.w), h: r2(box.h), ...(box.rot ? { rot: r2(box.rot) } : {}), fit: 'fill' };
+  const pf: PictureFrame = { id: newId('pic'), kind: 'picture', x: r2(box.x), y: r2(box.y), w: r2(box.w), h: r2(box.h), ...(box.rot ? { rot: r2(box.rot) } : {}), ...(box.skew ? { skew: box.skew } : {}), fit: 'fill' };
   const link = kid(img, 'Link');
   const uri = link?.getAttribute('LinkResourceURI') || '';
   let name = '';
@@ -175,7 +187,7 @@ async function readItem(env: Env, el: Element, parent: Matrix): Promise<Parsed |
   const g = geometryOf(el);
   if (!g) { if (!['Properties', 'TextFramePreference', 'TextWrapPreference', 'Page', 'FlattenerPreference', 'TransparencySetting', 'InCopyExportOption', 'ObjectExportOption', 'FrameFittingOption', 'AnchoredObjectSetting', 'TextFramePreference'].includes(kind)) env.unsupported.set(kind, (env.unsupported.get(kind) || 0) + 1); return null; }
   const box = boxOf(g, m);
-  const base = { x: r2(box.x), y: r2(box.y), w: r2(Math.max(0.5, box.w)), h: r2(Math.max(0.5, box.h)), ...(box.rot ? { rot: r2(box.rot) } : {}) };
+  const base = { x: r2(box.x), y: r2(box.y), w: r2(Math.max(0.5, box.w)), h: r2(Math.max(0.5, box.h)), ...(box.rot ? { rot: r2(box.rot) } : {}), ...(box.skew ? { skew: box.skew } : {}) };
   const center = { cx: box.x + box.w / 2, cy: box.y + box.h / 2 };
   let item: Item | null = null;
   if (kind === 'TextFrame') {

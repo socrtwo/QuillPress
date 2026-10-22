@@ -79,7 +79,11 @@ function runFields(r: RunProps, prefix = ''): any[] {
     { key: prefix + 'caps', label: 'Capitals', type: 'select', options: [{ value: 'none', label: 'Normal' }, { value: 'small', label: 'Small caps' }, { value: 'all', label: 'All caps' }], value: r.caps || 'none', half: true },
     { key: prefix + 'color', label: 'Color', type: 'color', value: r.color && /^#/.test(r.color) ? r.color : '#000000', half: true },
     { key: prefix + 'spc', label: 'Tracking (pt)', type: 'number', min: -20, max: 100, step: 0.1, value: r.spc ?? 0, half: true },
-    { key: prefix + 'baseline', label: 'Baseline shift (% of size)', type: 'number', min: -100, max: 100, value: r.baseline ?? 0, half: true },
+    { key: prefix + 'baseline', label: 'Superscript/subscript (% of size)', type: 'number', min: -100, max: 100, value: r.baseline ?? 0, half: true },
+    { key: prefix + 'shift', label: 'Baseline shift (pt)', type: 'number', min: -1000, max: 1000, step: 0.1, value: r.shift ?? 0, half: true },
+    { key: prefix + 'hscale', label: 'Horizontal scale (%)', type: 'number', min: 1, max: 1000, step: 1, value: r.hscale ?? 100, half: true },
+    { key: prefix + 'outline', label: 'Outline', type: 'checkbox', value: !!r.outline, half: true },
+    { key: prefix + 'tshadow', label: 'Shadow', type: 'checkbox', value: !!r.tshadow, half: true },
     { key: prefix + 'kern', label: 'Kerning', type: 'checkbox', value: r.kern !== false, half: true },
     { key: prefix + 'liga', label: 'Ligatures', type: 'checkbox', value: r.liga !== false, half: true },
   ];
@@ -95,6 +99,10 @@ function runFromFields(v: Record<string, any>, prefix = '', base: RunProps = {})
   out.color = g('color') && g('color') !== '#000000' ? g('color') : base.color && !/^#/.test(base.color) ? base.color : g('color') === '#000000' && base.color ? '#000000' : undefined;
   out.spc = +g('spc') || undefined;
   out.baseline = +g('baseline') || undefined;
+  out.shift = +g('shift') || undefined;
+  out.hscale = +g('hscale') > 0 && +g('hscale') !== 100 ? +g('hscale') : undefined;
+  out.outline = !!g('outline') || undefined;
+  out.tshadow = !!g('tshadow') || undefined;
   out.kern = g('kern') ? undefined : false;
   out.liga = g('liga') ? undefined : false;
   for (const k of Object.keys(out)) if ((out as any)[k] === undefined) delete (out as any)[k];
@@ -388,6 +396,22 @@ def([
     menu: () => [-50, -33, -20, -10, 0, 10, 20, 33, 50].map((v) => ({ id: 'fmt.baselineShift', arg: v, label: v === 0 ? 'None' : `${v > 0 ? '+' : ''}${v}%` })),
     run: (app, v?: number | string) => { const n = parseFloat(String(v)); if (!isNaN(n)) applyRun(app, 'Baseline Shift', { baseline: n || undefined }); },
   },
+  {
+    id: 'fmt.baselineShiftPoints', label: 'Baseline Shift (pt)', icon: 'height', tab: 'Text', group: 'Typography', kind: 'size', edits: true, origin: 'Baseline shift (QuarkXPress, PageMaker)',
+    tip: 'Raise (positive) or lower the text by points, at full size (superscript and subscript are separate)',
+    value: (app) => effectiveRun(app).shift ?? 0,
+    menu: () => [-6, -3, -2, -1, 0, 1, 2, 3, 6].map((v) => ({ id: 'fmt.baselineShiftPoints', arg: v, label: v === 0 ? 'None' : `${v > 0 ? '+' : ''}${v} pt` })),
+    run: (app, v?: number | string) => { const x = parseFloat(String(v)); if (!isNaN(x)) applyRun(app, 'Baseline Shift', { shift: x || undefined }); },
+  },
+  {
+    id: 'fmt.hscale', label: 'Horizontal Scale', icon: 'width', tab: 'Text', group: 'Typography', kind: 'size', edits: true, origin: 'Horizontal scale (QuarkXPress, PageMaker set width)',
+    tip: 'Stretch or condense the glyphs horizontally (percent of their normal width)',
+    value: (app) => effectiveRun(app).hscale ?? 100,
+    menu: () => [50, 70, 80, 90, 100, 110, 120, 150, 200].map((v) => ({ id: 'fmt.hscale', arg: v, label: v === 100 ? 'Normal (100%)' : `${v}%` })),
+    run: (app, v?: number | string) => { const x = parseFloat(String(v)); if (x > 0) applyRun(app, 'Horizontal Scale', { hscale: x === 100 ? undefined : Math.min(1000, x) }); },
+  },
+  { id: 'fmt.outline', label: 'Outline', icon: 'format_color_text', tab: 'Text', group: 'Typography', kind: 'toggle', edits: true, origin: 'Outline type style (Macintosh, QuarkXPress, PageMaker)', tip: 'Outline type: the letters drawn as outlines in the text color, filled with paper', isActive: (app) => !!effectiveRun(app).outline, run: (app) => { const on = !!effectiveRun(app).outline; applyRun(app, 'Outline', { outline: on ? undefined : true }); } },
+  { id: 'fmt.textShadow', label: 'Shadow', icon: 'texture', tab: 'Text', group: 'Typography', kind: 'toggle', edits: true, origin: 'Shadow type style (Macintosh, QuarkXPress, PageMaker)', tip: 'Shadow type: a lighter copy of the letters behind them, down and to the right', isActive: (app) => !!effectiveRun(app).tshadow, run: (app) => { const on = !!effectiveRun(app).tshadow; applyRun(app, 'Shadow', { tshadow: on ? undefined : true }); } },
   { id: 'fmt.hyphenation', label: 'Hyphenate', icon: 'remove', tab: 'Text', group: 'Typography', kind: 'toggle', edits: true, origin: 'TeX hyphenation', tip: 'Break long words at syllable-like points so justified text has fewer gaps', isActive: (app) => !!effectivePara(app).hyphenate, run: (app) => { const on = !!effectivePara(app).hyphenate; applyPara(app, 'Hyphenate', { hyphenate: on ? undefined : true }); } },
   {
     id: 'fmt.opticalMargin', label: 'Optical Margin Alignment', icon: 'format_indent_decrease', tab: 'Text', group: 'Typography', kind: 'toggle', edits: true, origin: 'Hanging punctuation (Gutenberg; InDesign optical margin alignment)',

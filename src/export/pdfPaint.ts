@@ -2,7 +2,8 @@
  * Painting helpers for the PDF writer, matched to what the SVG renderer (src/render/page.ts) shows:
  * SVG path data to PDF path operators, fills (solid, gradient as an axial or radial shading in the
  * object's bounding box, hatch patterns as tiling patterns, picture fills), line ends (the renderer's
- * marker shapes at the same size and angle) and drop shadows (offset, without the blur).
+ * marker shapes at the same size and angle) and the hard-edged drop shadow (pdfEffects.ts draws the
+ * blurred one where a canvas exists).
  */
 import type { Fill, Line, ArrowEnd } from '../model/types';
 import { colorHex } from '../model/styles';

@@ -23,10 +23,11 @@ import { pathTextLayout, pathPolyline, localToPage, pathTextNotes } from '../ren
 import { tableLayout } from '../render/table';
 import { defaultShapeFillLine } from '../render/page';
 import { DEFAULT_FOOTNOTE_OPTIONS } from '../model/types';
-import { layoutStory, baselineShift, type LaidLine, type FlowBox } from '../render/text';
+import { layoutStory, segRaise, hscaleOf, type LaidLine, type FlowBox } from '../render/text';
 import { PdfFonts, type EmbeddedFace, type FontLoader } from './fonts/embed';
 import { imageObj, deflate, pictureFilter, type ImageEntry } from './pdfImages';
-import { pathOps, rgb, n, fillPath, fillColor, lineEndsOps, shadowOps, type PaintCtx, type PathEnds } from './pdfPaint';
+import { pathOps, rgb, n, fillPath, fillColor, lineEndsOps, type PaintCtx, type PathEnds } from './pdfPaint';
+import { effectsOps } from './pdfEffects';
 
 export interface PdfOptions {
   /** Include the bleed area (page box grows by the bleed; TrimBox marks the page). */
@@ -180,8 +181,10 @@ function cm(ctx: Ctx, out: string[], a: number, b: number, c: number, d: number,
 }
 
 /** Rotation by `deg` (clockwise on the page) and flips about a center point, as the renderer's transforms. */
-function rotateFlip(ctx: Ctx, out: string[], cx: number, cy: number, deg: number | undefined, flipH: boolean | undefined, flipV: boolean | undefined): void {
+function rotateFlip(ctx: Ctx, out: string[], cx: number, cy: number, deg: number | undefined, flipH: boolean | undefined, flipV: boolean | undefined, skew?: number): void {
   if (deg) { const a = (deg * Math.PI) / 180; cm(ctx, out, 1, 0, 0, 1, cx, cy); cm(ctx, out, Math.cos(a), Math.sin(a), -Math.sin(a), Math.cos(a), 0, 0); cm(ctx, out, 1, 0, 0, 1, -cx, -cy); }
+  // Skew about the centre inside the rotation, as the renderer's skewX(-skew): positive leans the top right.
+  if (skew) { cm(ctx, out, 1, 0, 0, 1, cx, cy); cm(ctx, out, 1, 0, Math.tan((-skew * Math.PI) / 180), 1, 0, 0); cm(ctx, out, 1, 0, 0, 1, -cx, -cy); }
   if (flipH || flipV) { cm(ctx, out, 1, 0, 0, 1, cx, cy); cm(ctx, out, flipH ? -1 : 1, 0, 0, flipV ? -1 : 1, 0, 0); cm(ctx, out, 1, 0, 0, 1, -cx, -cy); }
 }
 
@@ -254,12 +257,33 @@ function smallCapsChunks(text: string, size: number): { text: string; size: numb
  * One run of text at a page position: in the embedded face (glyph ids, Identity-H), with characters
  * it lacks taken from the supplementary subsets, and only what no face has in a standard font.
  */
-async function textOps(ctx: Ctx, text: string, family: string | undefined, bold: boolean | undefined, italic: boolean | undefined, size: number, x: number, y: number, color: [number, number, number], spc: number, caps: 'all' | 'small' | 'none' | undefined, angle = 0): Promise<string> {
+/** Type effects a text writer applies: horizontal glyph scale (factor) and outline type. */
+interface TextFx { hscale?: number; outline?: boolean }
+
+/**
+ * Fill colour, render mode and stroke for a piece of text: outline type strokes the glyphs in the text
+ * colour over a paper-white fill; synthetic bold strokes them in the text colour (both widen the stroke).
+ */
+function paintOps(color: [number, number, number], size: number, outline: boolean | undefined, synthBold: boolean): { fill: string; stroke: string } {
   const [r, g, b] = color;
+  const w = (outline ? size / 30 : 0) + (synthBold ? size / 30 : 0);
+  return { fill: outline ? '1 1 1 rg' : `${n(r)} ${n(g)} ${n(b)} rg`, stroke: w > 0 ? ` 2 Tr ${n(w)} w ${n(r)} ${n(g)} ${n(b)} RG` : '' };
+}
+
+/**
+ * Horizontal scaling for a factor (inside BT … ET). Tz is text state that survives ET like Tc, so every
+ * text object sets it, or a scaled run would stretch all the text drawn after it.
+ */
+const tzOp = (k: number) => ` ${n(k * 100)} Tz`;
+
+async function textOps(ctx: Ctx, text: string, family: string | undefined, bold: boolean | undefined, italic: boolean | undefined, size: number, x: number, y: number, color: [number, number, number], spc: number, caps: 'all' | 'small' | 'none' | undefined, angle = 0, fx: TextFx = {}): Promise<string> {
   // Text matrix for y-down page coordinates: the baseline runs along `angle` (degrees, clockwise).
   const ca = Math.cos((angle * Math.PI) / 180), sa = Math.sin((angle * Math.PI) / 180);
   const tm = (adv: number, skew = false) => `${n(ca)} ${n(sa)} ${n(sa + (skew ? 0.2 * ca : 0))} ${n(-ca + (skew ? 0.2 * sa : 0))} ${n(x + adv * ca)} ${n(y + adv * sa)} Tm`;
-  const fill = `${n(r)} ${n(g)} ${n(b)} rg`;
+  // Horizontal scale: Tz stretches the glyphs and the character spacing, so the spacing is divided by
+  // the factor to keep the tracking the layout used (glyphs × factor + tracking per character).
+  const k = fx.hscale && fx.hscale > 0 ? fx.hscale : 1;
+  const tc = spc / k;
   const std = stdFont(family, bold, italic);
   const face = ctx.opts.embedFonts === false ? null : await ctx.fontSet.face(family, bold, italic);
   const chunks = caps === 'small' ? smallCapsChunks(text, size) : [{ text: caps === 'all' ? text.toUpperCase() : text, size }];
@@ -268,17 +292,18 @@ async function textOps(ctx: Ctx, text: string, family: string | undefined, bold:
   const stdOp = (t: string, sz: number) => {
     const f = fontKey(ctx, std);
     ctx.missing += winAnsiMisses(t);
-    ops.push(`BT ${fill} ${f} ${n(sz)} Tf ${n(spc)} Tc ${tm(cx)} ${pdfText(t)} Tj ET`);
-    cx += textWidth(t, sz, std) + spc * [...t].length;
+    const p = paintOps(color, sz, fx.outline, false);
+    ops.push(`BT ${p.fill} ${f} ${n(sz)} Tf ${n(tc)} Tc${tzOp(k)}${p.stroke} ${tm(cx)} ${pdfText(t)} Tj ET${p.stroke ? ' 0 Tr' : ''}`);
+    cx += textWidth(t, sz, std) * k + spc * [...t].length;
   };
   for (const ch of chunks) {
     if (!face) { stdOp(ch.text, ch.size); continue; }
-    for (const piece of await ctx.fontSet.encodeAll(face, ch.text, ch.size, spc)) {
+    for (const piece of await ctx.fontSet.encodeAll(face, ch.text, ch.size, tc)) {
       if ('hex' in piece) {
         const res = embeddedKey(ctx, piece.face);
-        const synth = piece.face.synthBold ? ` 2 Tr ${n(piece.size / 30)} w ${n(r)} ${n(g)} ${n(b)} RG` : '';
-        ops.push(`BT ${fill} ${res} ${n(piece.size)} Tf ${n(spc)} Tc${synth} ${tm(cx, !!piece.face.synthItalic)} <${piece.hex}> Tj ET${synth ? ' 0 Tr' : ''}`);
-        cx += piece.width;
+        const p = paintOps(color, piece.size, fx.outline, !!piece.face.synthBold);
+        ops.push(`BT ${p.fill} ${res} ${n(piece.size)} Tf ${n(tc)} Tc${tzOp(k)}${p.stroke} ${tm(cx, !!piece.face.synthItalic)} <${piece.hex}> Tj ET${p.stroke ? ' 0 Tr' : ''}`);
+        cx += piece.width * k;
       } else {
         stdOp(piece.fallback, piece.size);
       }
@@ -288,34 +313,47 @@ async function textOps(ctx: Ctx, text: string, family: string | undefined, bold:
 }
 
 /**
+ * Shadow type: the same text again, offset down and right by a twelfth of the size (along the glyph's
+ * own axes for rotated text) in the text colour at 45% opacity, drawn before the text. The copy is
+ * marked with an empty ActualText so text extraction and copying see the words once.
+ */
+function shadowWrap(ops: string): string {
+  return ops ? `q /GSa45 gs /Span << /ActualText () >> BDC\n${ops}\nEMC Q` : '';
+}
+
+/**
  * Consecutive segments of one style as a single TJ string in one embedded face: each segment's glyphs,
  * then the adjustment that moves the pen to the next segment's laid-out start. Null when the run needs
  * more than that (characters from another face or a standard font, small capitals, standard fonts).
  */
-async function groupOps(ctx: Ctx, l: LaidLine, segs: LaidLine['segs']): Promise<string | null> {
+async function groupOps(ctx: Ctx, l: LaidLine, segs: LaidLine['segs'], shadow = false): Promise<string | null> {
   const s0 = segs[0], st = s0.style;
   if (ctx.opts.embedFonts === false || st.caps === 'small') return null;
   const face = await ctx.fontSet.face(s0.font, st.b, st.i);
   if (!face) return null;
-  const spc = st.spc || 0;
+  // Horizontal scale (Tz) also scales the character spacing and the TJ adjustments, so both are given
+  // in unscaled text space: positions are divided by the factor.
+  const k = hscaleOf(st);
+  const tc = (st.spc || 0) / k;
   const parts: string[] = [];
   let pen = 0;
   for (const s of segs) {
     if (!s.text) continue;
-    const pieces = await ctx.fontSet.encodeAll(face, st.caps === 'all' ? s.text.toUpperCase() : s.text, s0.size, spc);
+    const pieces = await ctx.fontSet.encodeAll(face, st.caps === 'all' ? s.text.toUpperCase() : s.text, s0.size, tc);
     if (pieces.some((p) => !('hex' in p) || p.face !== face)) return null;
-    const target = s.x - s0.x;
+    const target = (s.x - s0.x) / k;
     if (Math.abs(target - pen) > 0.001) parts.push(n(((pen - target) * 1000) / s0.size));
     for (const p of pieces) if ('hex' in p) { parts.push(`<${p.hex}>`); pen += p.width; }
     pen = target + pieces.reduce((a, p) => a + p.width, 0);
   }
   if (!parts.length) return null;
-  const [r, g, b] = rgb(colorHex(ctx.pub.data, st.color));
-  const y = l.y - baselineShift(st.baseline, s0.size);
+  const color = rgb(colorHex(ctx.pub.data, st.color));
+  const off = shadow ? s0.size / 12 : 0;
+  const y = l.y - segRaise(st, s0.size) + off;
   const res = embeddedKey(ctx, face);
-  const synth = face.synthBold ? ` 2 Tr ${n(s0.size / 30)} w ${n(r)} ${n(g)} ${n(b)} RG` : '';
+  const p = shadow ? { fill: `${n(color[0])} ${n(color[1])} ${n(color[2])} rg`, stroke: '' } : paintOps(color, s0.size, st.outline, !!face.synthBold);
   const sk = face.synthItalic ? 0.2 : 0;
-  return `BT ${n(r)} ${n(g)} ${n(b)} rg ${res} ${n(s0.size)} Tf ${n(spc)} Tc${synth} 1 0 ${n(sk)} -1 ${n(l.x + s0.x)} ${n(y)} Tm [${parts.join(' ')}] TJ ET${synth ? ' 0 Tr' : ''}`;
+  return `BT ${p.fill} ${res} ${n(s0.size)} Tf ${n(tc)} Tc${tzOp(k)}${p.stroke} 1 0 ${n(sk)} -1 ${n(l.x + s0.x + off)} ${n(y)} Tm [${parts.join(' ')}] TJ ET${p.stroke ? ' 0 Tr' : ''}`;
 }
 
 /** Text of laid-out lines as PDF operators (coordinates of the current space, y down). */
@@ -336,7 +374,11 @@ async function linesOps(ctx: Ctx, lines: LaidLine[]): Promise<string> {
       while (j < l.segs.length && !l.segs[j].drop && !l.segs[j].anchor && !l.segs[j].footnote && key(l.segs[j]) === key(a)) j++;
       if (j - i > 1 && !a.drop && !a.anchor && !a.footnote) {
         const ops = await groupOps(ctx, l, l.segs.slice(i, j));
-        if (ops) { out.push(ops); for (let k = i; k < j; k++) drawn.add(k); }
+        if (ops) {
+          if (a.style.tshadow) out.push(shadowWrap((await groupOps(ctx, l, l.segs.slice(i, j), true)) || ''));
+          out.push(ops);
+          for (let k = i; k < j; k++) drawn.add(k);
+        }
       }
       i = j;
     }
@@ -351,8 +393,12 @@ async function linesOps(ctx: Ctx, lines: LaidLine[]): Promise<string> {
       const color = rgb(colorHex(d, st.color));
       let y = l.y;
       if (s.drop) y = l.y + (s.drop - 1) * l.height;
-      y -= baselineShift(st.baseline, s.size);
-      if (!drawn.has(si)) out.push(await textOps(ctx, s.text, s.font, st.b, st.i, s.size, l.x + s.x, y, color, st.spc || 0, st.caps));
+      y -= segRaise(st, s.size);
+      const fx: TextFx = { hscale: hscaleOf(st), outline: st.outline };
+      if (!drawn.has(si)) {
+        if (st.tshadow) { const off = s.size / 12; out.push(shadowWrap(await textOps(ctx, s.text, s.font, st.b, st.i, s.size, l.x + s.x + off, y + off, color, st.spc || 0, st.caps, 0, { hscale: fx.hscale }))); }
+        out.push(await textOps(ctx, s.text, s.font, st.b, st.i, s.size, l.x + s.x, y, color, st.spc || 0, st.caps, 0, fx));
+      }
       if (st.u || st.strike) {
         const [r, g, b] = color;
         const yy = st.u ? y + s.size * 0.12 : y - s.size * 0.3;
@@ -381,7 +427,14 @@ async function pathTextOps(ctx: Ctx, e: PathTextItem, out: string[]): Promise<vo
     const a = (g.angle * Math.PI) / 180;
     // The glyph's origin sits half an advance before its center, along the baseline.
     const ox = g.x - (g.w / 2) * Math.cos(a), oy = g.y - (g.w / 2) * Math.sin(a);
-    out.push(await textOps(ctx, g.ch, g.font, st.b, st.i, g.size, ox, oy, rgb(colorHex(pub.data, st.color)), 0, st.caps, g.angle));
+    const color = rgb(colorHex(pub.data, st.color));
+    const k = hscaleOf(st);
+    if (st.tshadow) {
+      // The shadow offset runs along the glyph's own axes (down and right of the glyph).
+      const off = g.size / 12;
+      out.push(shadowWrap(await textOps(ctx, g.ch, g.font, st.b, st.i, g.size, ox + off * (Math.cos(a) - Math.sin(a)), oy + off * (Math.sin(a) + Math.cos(a)), color, 0, st.caps, g.angle, { hscale: k })));
+    }
+    out.push(await textOps(ctx, g.ch, g.font, st.b, st.i, g.size, ox, oy, color, 0, st.caps, g.angle, { hscale: k, outline: st.outline }));
   }
   // Footnotes: the note area under the item's box, in the item's local coordinates (position, rotation, flips).
   const notes = pathTextNotes(e, layoutOptions(pub, []));
@@ -389,7 +442,7 @@ async function pathTextOps(ctx: Ctx, e: PathTextItem, out: string[]): Promise<vo
     const saved = ctx.m;
     out.push('q');
     cm(ctx, out, 1, 0, 0, 1, e.x, e.y);
-    rotateFlip(ctx, out, e.w / 2, e.h / 2, e.rot, e.flipH, e.flipV);
+    rotateFlip(ctx, out, e.w / 2, e.h / 2, e.rot, e.flipH, e.flipV, e.skew);
     const fo = pub.data.footnoteOptions || DEFAULT_FOOTNOTE_OPTIONS;
     const sp = notes.separator;
     if (sp && sp.w > 0 && fo.separator.width > 0) out.push(`q 0 G ${n(fo.separator.width)} w ${n(sp.x)} ${n(sp.y)} m ${n(sp.x + sp.w)} ${n(sp.y)} l S Q`);
@@ -431,7 +484,7 @@ async function itemOps(ctx: Ctx, e: Item, owner: Page | Master, fromMaster: bool
   if (e.kind === 'pathText') { await pathTextOps(ctx, e, out); return; }
   const saved = ctx.m;
   out.push('q');
-  rotateFlip(ctx, out, e.x + e.w / 2, e.y + e.h / 2, e.rot, e.flipH, e.flipV);
+  rotateFlip(ctx, out, e.x + e.w / 2, e.y + e.h / 2, e.rot, e.flipH, e.flipV, e.skew);
   if (e.alpha != null && e.alpha < 1) out.push(`/GSa${Math.round(e.alpha * 100)} gs`);
   const os = pub.objectStyle(e.ostyle);
   const fill = e.fill ?? os?.fill;
@@ -460,7 +513,7 @@ async function itemOps(ctx: Ctx, e: Item, owner: Page | Master, fromMaster: bool
       const l = line ?? def.line;
       const so = strokeOp(ctx, l);
       out.push(`q ${at}`);
-      if (f && f.type !== 'none') { const sh = shadowOps(ctx, e.effects, path, true); if (sh) out.push(sh); }
+      if (f && f.type !== 'none') { const sh = await effectsOps(ctx, e.effects, path, true); if (sh) out.push(sh); }
       const fo = await fillPath(ctx, f, path, e.w, e.h, true);
       if (fo) out.push(fo);
       if (so) out.push(`q ${so}\n${path}\nS Q`);
@@ -473,7 +526,7 @@ async function itemOps(ctx: Ctx, e: Item, owner: Page | Master, fromMaster: bool
       const path = pathOps(d);
       const so = strokeOp(ctx, line);
       out.push(`q ${at}`);
-      if (fill && fill.type !== 'none') { const sh = shadowOps(ctx, e.effects, path); if (sh) out.push(sh); }
+      if (fill && fill.type !== 'none') { const sh = await effectsOps(ctx, e.effects, path); if (sh) out.push(sh); }
       const fo = await fillPath(ctx, fill, path, e.w, e.h);
       if (fo) out.push(fo);
       if (so) out.push(`q ${so}\n${path}\nS Q`);
@@ -499,7 +552,7 @@ async function itemOps(ctx: Ctx, e: Item, owner: Page | Master, fromMaster: bool
       const { d } = geometryPath(e.geom || 'rect', e.w, e.h);
       const path = pathOps(d);
       out.push(`q ${at}`);
-      if (e.media || (fill && fill.type !== 'none')) { const sh = shadowOps(ctx, e.effects, path); if (sh) out.push(sh); }
+      if (e.media || (fill && fill.type !== 'none')) { const sh = await effectsOps(ctx, e.effects, path); if (sh) out.push(sh); }
       const fo = await fillPath(ctx, fill, path, e.w, e.h);
       if (fo) out.push(fo);
       if (e.media) {
@@ -593,7 +646,7 @@ export async function pubToPdf(pub: Pub, opts: PdfOptions = {}): Promise<Uint8Ar
       }
       ops.push(`q 0 G 0.25 w ${mk.join(' ')} Q`);
       const f = fontKey(ctx, 'Helvetica');
-      ops.push(`BT 0 g ${f} 7 Tf 1 0 0 -1 ${n(0)} ${n(-off - L - 4)} Tm ${pdfText(`${pub.data.props.title || 'Untitled'}  page ${pub.pageLabel(pageIndex) || pageIndex + 1}  ${new Date().toLocaleDateString()}`)} Tj ET`);
+      ops.push(`BT 0 g ${f} 7 Tf 0 Tc 100 Tz 1 0 0 -1 ${n(0)} ${n(-off - L - 4)} Tm ${pdfText(`${pub.data.props.title || 'Untitled'}  page ${pub.pageLabel(pageIndex) || pageIndex + 1}  ${new Date().toLocaleDateString()}`)} Tj ET`);
     }
     for (const line of ops) for (const mm of line.matchAll(/\/GSa(\d+) gs/g)) gsObjs.add(+mm[1]);
     pageData.push({ content: w.stream('', ops.join('\n')), links: ctx.links });

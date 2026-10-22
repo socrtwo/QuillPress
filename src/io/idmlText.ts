@@ -134,6 +134,16 @@ export function runPropsOf(a: Record<string, any>, colors: ColorTable, fonts?: S
   if (a.FontStyle && !r.b && !r.i && /regular|roman|book|medium|light/i.test(fs)) { r.b = false; r.i = false; }
   const color = colors.of(a.FillColor);
   if (color) r.color = color;
+  // Paper- or none-filled glyphs with a stroke are outline type.
+  if ((numOf(a.StrokeWeight) ?? 0) > 0 && a.StrokeColor && a.StrokeColor !== 'Swatch/None' && (a.FillColor === 'Color/Paper' || a.FillColor === 'Swatch/None')) {
+    r.outline = true;
+    const sc = colors.of(a.StrokeColor);
+    if (sc) r.color = sc; else delete r.color;
+  }
+  const hs = numOf(a.HorizontalScale);
+  if (hs && Math.abs(hs - 100) > 0.01) r.hscale = hs;
+  const bs = numOf(a.BaselineShift);
+  if (bs) r.shift = bs;
   if (a.Underline === 'true' || a.Underline === true) r.u = true;
   if (a.StrikeThru === 'true' || a.StrikeThru === true) r.strike = true;
   if (a.Capitalization === 'AllCaps' || a.Capitalization === 'CapToSmallCap') r.caps = a.Capitalization === 'AllCaps' ? 'all' : 'small';

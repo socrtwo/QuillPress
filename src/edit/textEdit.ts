@@ -178,6 +178,13 @@ export class TextEditor {
     if (r.caps === 'all') s.textTransform = 'uppercase';
     if (r.caps === 'small') s.fontVariant = 'small-caps';
     if (r.spc) s.letterSpacing = `${r.spc}px`;
+    // Type effects as CSS: outline (stroked glyphs on paper), shadow (an offset copy at 45%), and the baseline
+    // shift in points. The island does not show horizontal scale (a transform on inline text would break the
+    // caret); the page under it does.
+    const ink = r.color ? colorHex(pub, r.color) : '#000000';
+    if (r.outline) { s.setProperty('-webkit-text-stroke', `${Math.max(0.25, (r.size || 10.5) / 30)}px ${ink}`); s.color = '#ffffff'; }
+    if (r.tshadow) s.textShadow = `0.083em 0.083em 0 color-mix(in srgb, ${ink} 45%, transparent)`;
+    if (r.shift) { s.position = 'relative'; s.top = `${-r.shift}px`; }
     if (r.link) { s.textDecoration = 'underline'; s.color = colorHex(pub, 'Primary'); }
     if ((ov as any).field) { s.backgroundColor = 'rgba(91,60,158,.12)'; sp.contentEditable = 'false'; }
   }

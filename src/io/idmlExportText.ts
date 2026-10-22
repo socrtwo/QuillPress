@@ -173,12 +173,17 @@ export function runAttrs(ctx: ExportCtx, r: RunProps, size: number): { attrs: st
   let a = '', p = '';
   if (r.b !== undefined || r.i !== undefined) a += ` FontStyle="${r.b && r.i ? 'Bold Italic' : r.b ? 'Bold' : r.i ? 'Italic' : 'Regular'}"`;
   if (r.size) a += ` PointSize="${n(r.size)}"`;
-  if (r.color) a += ` FillColor="${esc(colorRef(ctx, r.color))}"`;
+  if (r.outline) {
+    // IDML has no outline style: paper-filled glyphs stroked in the text colour give the same look.
+    a += ` FillColor="Color/Paper" StrokeColor="${esc(colorRef(ctx, r.color || 'Black'))}" StrokeWeight="${n((r.size || size || 10) / 30)}"`;
+  } else if (r.color) a += ` FillColor="${esc(colorRef(ctx, r.color))}"`;
   if (r.u !== undefined) a += ` Underline="${r.u ? 'true' : 'false'}"`;
   if (r.strike !== undefined) a += ` StrikeThru="${r.strike ? 'true' : 'false'}"`;
   if (r.caps) a += ` Capitalization="${r.caps === 'all' ? 'AllCaps' : r.caps === 'small' ? 'SmallCaps' : 'Normal'}"`;
   if (r.baseline !== undefined) a += ` Position="${r.baseline > 0 ? 'Superscript' : r.baseline < 0 ? 'Subscript' : 'Normal'}"`;
   if (r.spc) a += ` Tracking="${n((r.spc * 1000) / (r.size || size || 10))}"`;
+  if (r.hscale !== undefined && r.hscale !== 100) a += ` HorizontalScale="${n(r.hscale)}"`;
+  if (r.shift) a += ` BaselineShift="${n(r.shift)}"`;
   if (r.liga !== undefined) a += ` Ligatures="${r.liga ? 'true' : 'false'}"`;
   if (r.kern !== undefined) a += ` KerningMethod="${r.kern ? '$ID/Metrics' : '$ID/None'}"`;
   if (r.font) p += `<AppliedFont type="string">${esc(r.font)}</AppliedFont>`;

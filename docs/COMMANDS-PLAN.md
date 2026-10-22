@@ -346,6 +346,10 @@ Text frames and flow, frame options, typography, paragraph flow and text tools.
 - `fmt.baselineGridAlign` — Align to Baseline Grid: Snap this paragraph's baselines to the publication's baseline grid
 - `fmt.allCaps` — All Caps (Ctrl+Shift+a)
 - `fmt.baselineShift` — Baseline Shift: Raise or lower the text relative to the baseline (% of the size)
+- `fmt.baselineShiftPoints` — Baseline Shift (pt): Raise or lower the text by points, at full size
+- `fmt.hscale` — Horizontal Scale: Stretch or condense the glyphs horizontally (percent)
+- `fmt.outline` — Outline: Outline type, the letters stroked in the text color and filled with paper
+- `fmt.textShadow` — Shadow: Shadow type, a lighter copy of the letters behind them
 - `fmt.hyphenation` — Hyphenate: Break long words at syllable-like points so justified text has fewer gaps *(inspired by TeX hyphenation)*
 - `fmt.kerning` — Kerning: Pair kerning from the font (on by default)
 - `fmt.ligatures` — Ligatures: Standard ligatures (fi, fl) from the font
@@ -460,6 +464,7 @@ Order, align, group, rotate, text wrap, size and position, layers.
 - `arrange.flipH` — Flip Horizontal
 - `arrange.flipV` — Flip Vertical
 - `arrange.rotate` — Rotate
+- `arrange.skew` — Skew: Slant the object horizontally about its center
 - `arrange.rotateLeft` — Rotate Left 90°
 - `arrange.rotateRight` — Rotate Right 90°
 

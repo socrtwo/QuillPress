@@ -19,7 +19,7 @@
 import type { PathTextItem, Paragraph, RunProps, FootnoteOptions } from '../model/types';
 import { DEFAULT_FOOTNOTE_OPTIONS } from '../model/types';
 import { flattenPath, polyline, pointAt, reversed, type Pt } from '../model/pathGeom';
-import { measure as defaultMeasure, cssFont, footnoteLabel, labeledFootnote, layoutStory, type MeasureFn, type ResolvedParaStyle, type LayoutOptions, type LaidLine, type FlowBox } from './text';
+import { measure as defaultMeasure, cssFont, hscaleOf, footnoteLabel, labeledFootnote, layoutStory, type MeasureFn, type ResolvedParaStyle, type LayoutOptions, type LaidLine, type FlowBox } from './text';
 
 export interface PathGlyph { ch: string; x: number; y: number; angle: number; w: number; size: number; font: string; style: RunProps; /** The footnote this glyph is the reference label of. */ footnote?: string }
 
@@ -68,6 +68,8 @@ export function localToPage(item: PathTextItem, p: Pt): Pt {
   let x = p.x, y = p.y;
   if (item.flipH) x = item.w - x;
   if (item.flipV) y = item.h - y;
+  // Skew about the centre (positive leans the top to the right), inside the rotation as the renderer does.
+  if (item.skew) x += Math.tan((item.skew * Math.PI) / 180) * (item.h / 2 - y);
   if (item.rot) {
     const a = (item.rot * Math.PI) / 180, cx = item.w / 2, cy = item.h / 2;
     const dx = x - cx, dy = y - cy;
@@ -118,7 +120,7 @@ export function pathTextLayout(item: PathTextItem, o: PathTextOptions): PathText
   const pl = polyline(pts);
   const cs = chars(item, o);
   const spacing = item.spacing || 0;
-  const widths = cs.map((c) => m(c.ch, c.css) + (c.style.spc || 0) + spacing);
+  const widths = cs.map((c) => m(c.ch, c.css) * hscaleOf(c.style) + (c.style.spc || 0) + spacing);
   const total = widths.reduce((a, b) => a + b, 0) - (cs.length ? spacing : 0);
   const free = Math.max(0, pl.length - total - item.offset);
   let s = item.offset;
@@ -135,7 +137,8 @@ export function pathTextLayout(item: PathTextItem, o: PathTextOptions): PathText
     const p = pointAt(pl, mid);
     // Shift along the normal: the left of the direction of travel is "above" the path.
     const nx = Math.sin(p.angle), ny = -Math.cos(p.angle);
-    const local = { x: p.x + nx * (item.baseline + (c.raise || 0)), y: p.y + ny * (item.baseline + (c.raise || 0)) };
+    const lift = item.baseline + (c.raise || 0) + (c.style.shift ?? 0);
+    const local = { x: p.x + nx * lift, y: p.y + ny * lift };
     const pageP = localToPage(item, local);
     // The angle comes from the page-space tangent, so rotation and flips of the item are honored.
     const ahead = localToPage(item, { x: local.x + Math.cos(p.angle), y: local.y + Math.sin(p.angle) });

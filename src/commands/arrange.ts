@@ -85,7 +85,7 @@ def([
   { id: 'arrange.showAll', label: 'Show All on Page', icon: 'visibility', tab: 'Arrange', group: 'Group', keys: ['Mod-Alt-3'], edits: true, run: (app) => { const o = app.owner; if (!o) return; edit(app, 'Show All', () => { for (const e of flatItems(o)) delete e.hidden; }); } },
   {
     id: 'arrange.rotate', label: 'Rotate', icon: 'rotate_right', tab: 'Arrange', group: 'Rotate', kind: 'menu', edits: true, isEnabled: hasSel,
-    menu: () => [{ id: 'arrange.rotateRight', label: 'Rotate Right 90°', icon: 'rotate_right' }, { id: 'arrange.rotateLeft', label: 'Rotate Left 90°', icon: 'rotate_left' }, { id: 'arrange.rotate', arg: 180, label: 'Rotate 180°' }, { separator: true }, { id: 'arrange.flipH', label: 'Flip Horizontal', icon: 'flip' }, { id: 'arrange.flipV', label: 'Flip Vertical', icon: 'flip' }, { separator: true }, { id: 'arrange.rotate', arg: 'dialog', label: 'Rotation…' }, { id: 'arrange.rotate', arg: 0, label: 'Reset Rotation' }],
+    menu: () => [{ id: 'arrange.rotateRight', label: 'Rotate Right 90°', icon: 'rotate_right' }, { id: 'arrange.rotateLeft', label: 'Rotate Left 90°', icon: 'rotate_left' }, { id: 'arrange.rotate', arg: 180, label: 'Rotate 180°' }, { separator: true }, { id: 'arrange.flipH', label: 'Flip Horizontal', icon: 'flip' }, { id: 'arrange.flipV', label: 'Flip Vertical', icon: 'flip' }, { separator: true }, { id: 'arrange.rotate', arg: 'dialog', label: 'Rotation…' }, { id: 'arrange.rotate', arg: 0, label: 'Reset Rotation' }, { separator: true }, { id: 'arrange.skew', arg: 'dialog', label: 'Skew…', icon: 'transform' }, { id: 'arrange.skew', arg: 0, label: 'Reset Skew' }],
     run: async (app, deg?: number | string) => {
       if (deg === 'dialog' || deg === undefined) {
         const cur = app.selected[0]?.rot || 0;
@@ -97,6 +97,22 @@ def([
       const n = +deg;
       if (n === 0) { patch(app, 'Reset Rotation', (e) => setBox(e, { rot: 0 })); return; }
       patch(app, 'Rotate', (e) => setBox(e, { rot: (e.rot || 0) + n }));
+    },
+  },
+  {
+    id: 'arrange.skew', label: 'Skew', icon: 'transform', tab: 'Arrange', group: 'Rotate', kind: 'menu', edits: true, isEnabled: hasSel, origin: 'Skew (QuarkXPress, PageMaker)',
+    tip: 'Slant the object horizontally about its center (positive leans the top to the right)',
+    menu: (app) => { const cur = app.selected[0]?.skew || 0; return [...[-30, -15, 0, 15, 30].map((v) => ({ id: 'arrange.skew', arg: v, label: v === 0 ? 'No Skew' : `${v > 0 ? '+' : ''}${v}°`, checked: Math.abs(cur - v) < 0.01 })), { separator: true }, { id: 'arrange.skew', arg: 'dialog', label: 'Skew…' }] as MenuEntry[]; },
+    run: async (app, deg?: number | string) => {
+      let v: number;
+      if (deg === 'dialog' || deg === undefined) {
+        const r = await openDialog({ title: 'Skew', fields: [{ key: 'd', label: 'Horizontal skew (degrees, positive leans the top right)', type: 'number', min: -75, max: 75, step: 0.1, value: app.selected[0]?.skew || 0 }] });
+        if (!r) return;
+        v = +r.d;
+      } else v = +deg;
+      if (!Number.isFinite(v)) return;
+      v = Math.max(-75, Math.min(75, v));
+      patch(app, v ? 'Skew' : 'Reset Skew', (e) => { if (v) e.skew = v; else delete e.skew; });
     },
   },
   { id: 'arrange.rotateLeft', label: 'Rotate Left 90°', icon: 'rotate_left', tab: 'Arrange', group: 'Rotate', edits: true, isEnabled: hasSel, run: (app) => patch(app, 'Rotate Left', (e) => setBox(e, { rot: (e.rot || 0) - 90 })) },
@@ -122,11 +138,12 @@ def([
       const r = await openDialog({ title: 'Size and Position', fields: [
         { key: 'x', label: `X (${u(app).label})`, type: 'number', step: 0.01, value: toU(app, e.x), half: true }, { key: 'y', label: `Y (${u(app).label})`, type: 'number', step: 0.01, value: toU(app, e.y), half: true },
         { key: 'w', label: `Width (${u(app).label})`, type: 'number', min: 0, step: 0.01, value: toU(app, e.w), half: true }, { key: 'h', label: `Height (${u(app).label})`, type: 'number', min: 0, step: 0.01, value: toU(app, e.h), half: true },
-        { key: 'rot', label: 'Rotation (°)', type: 'number', min: -360, max: 360, step: 0.1, value: e.rot || 0, half: true }, { key: 'prop', label: 'Keep proportions', type: 'checkbox', value: false, half: true },
+        { key: 'rot', label: 'Rotation (°)', type: 'number', min: -360, max: 360, step: 0.1, value: e.rot || 0, half: true }, { key: 'skew', label: 'Skew (°)', type: 'number', min: -75, max: 75, step: 0.1, value: e.skew || 0, half: true },
+        { key: 'prop', label: 'Keep proportions', type: 'checkbox', value: false, half: true },
         { key: 'name', label: 'Name', type: 'text', value: e.name || '' },
       ], onChange: (v, ctl, k) => { if (v.prop && e.w && e.h) { if (k === 'w') ctl.set('h', +((+v.w * e.h) / e.w).toFixed(3)); if (k === 'h') ctl.set('w', +((+v.h * e.w) / e.h).toFixed(3)); } } });
       if (!r) return;
-      edit(app, 'Size and Position', () => { const dx = fromU(app, r.x) - e.x, dy = fromU(app, r.y) - e.y; for (const s of app.selected) { if (s === e) setBox(s, { x: fromU(app, r.x), y: fromU(app, r.y), w: fromU(app, r.w), h: fromU(app, r.h), rot: +r.rot }); else setBox(s, { x: s.x + dx, y: s.y + dy }); } e.name = r.name || undefined; });
+      edit(app, 'Size and Position', () => { const dx = fromU(app, r.x) - e.x, dy = fromU(app, r.y) - e.y; for (const s of app.selected) { if (s === e) { setBox(s, { x: fromU(app, r.x), y: fromU(app, r.y), w: fromU(app, r.w), h: fromU(app, r.h), rot: +r.rot }); const sk = Math.max(-75, Math.min(75, +r.skew || 0)); if (sk) s.skew = sk; else delete s.skew; } else setBox(s, { x: s.x + dx, y: s.y + dy }); } e.name = r.name || undefined; });
     },
   },
   {

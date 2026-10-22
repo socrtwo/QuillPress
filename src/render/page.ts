@@ -8,7 +8,7 @@ import { DEFAULT_FOOTNOTE_OPTIONS } from '../model/types';
 import { colorHex, resolvePara, resolveRun } from '../model/styles';
 import { geometryPath, scalePath } from '../model/geometry';
 import { frameBoxes, frameLines, frameClipHeight, layoutOptions, storyOptions, cssFamily, syncAnchors, anchorPointOf } from './flow';
-import { layoutStory, baselineShift, type LaidLine, type FlowBox, cssFont } from './text';
+import { layoutStory, segRaise, hscaleOf, type LaidLine, type FlowBox, cssFont } from './text';
 import { pathTextLayout, pathTextNotes } from './pathText';
 import { tableLayout } from './table';
 import { escHtml } from '../util/sanitize';
@@ -205,11 +205,14 @@ function transformOf(e: Item): string {
     const cx = e.x + e.w / 2, cy = e.y + e.h / 2;
     const t: string[] = [];
     if (e.rot) t.push(`rotate(${n(e.rot)} ${n(cx)} ${n(cy)})`);
+    if (e.skew) t.push(`translate(${n(cx)} ${n(cy)}) skewX(${n(-e.skew)}) translate(${n(-cx)} ${n(-cy)})`);
     if (e.flipH || e.flipV) t.push(`translate(${n(cx)} ${n(cy)}) scale(${e.flipH ? -1 : 1} ${e.flipV ? -1 : 1}) translate(${n(-cx)} ${n(-cy)})`);
     return t.join(' ');
   }
   const t: string[] = [`translate(${n(e.x)} ${n(e.y)})`];
   if (e.rot) t.push(`rotate(${n(e.rot)} ${n(e.w / 2)} ${n(e.h / 2)})`);
+  // Skew about the centre, inside the rotation (positive leans the top to the right; SVG's skewX leans it left).
+  if (e.skew) t.push(`translate(${n(e.w / 2)} ${n(e.h / 2)}) skewX(${n(-e.skew)}) translate(${n(-e.w / 2)} ${n(-e.h / 2)})`);
   if (e.flipH || e.flipV) t.push(`translate(${e.flipH ? n(e.w) : 0} ${e.flipV ? n(e.h) : 0}) scale(${e.flipH ? -1 : 1} ${e.flipV ? -1 : 1})`);
   return t.join(' ');
 }
@@ -296,21 +299,42 @@ export function linesSvg(ctx: Ctx, lines: LaidLine[]): string {
     const parts: string[] = [];
     if (l.bullet) parts.push(`<text x="${n(l.bullet.x)}" y="${n(l.y)}" font-size="${n(l.bullet.size)}" font-family="${escHtml(cssFamily(l.bullet.font))}" fill="${colorHex(d, l.bullet.color)}">${escHtml(l.bullet.text)}</text>`);
     const spans: string[] = [];
+    // Shadow type: a copy of the glyphs, offset down and right by a twelfth of the size, under the line.
+    const shadows: string[] = [];
     for (const s of l.segs) {
       if (!s.text) continue;
       const st = s.style;
       const color = colorHex(d, st.color);
       const deco = [st.u ? 'underline' : '', st.strike ? 'line-through' : ''].filter(Boolean).join(' ');
-      const baseline = st.baseline ? ` baseline-shift="${n(baselineShift(st.baseline, s.size))}"` : '';
-      let style = `font-family:${escHtml(cssFamily(s.font))};font-size:${n(s.size)}px;${st.b ? 'font-weight:bold;' : ''}${st.i ? 'font-style:italic;' : ''}${deco ? `text-decoration:${deco};` : ''}${st.caps === 'small' ? 'font-variant:small-caps;' : ''}${st.spc ? `letter-spacing:${n(st.spc)}px;` : ''}${st.liga === false ? 'font-variant-ligatures:none;' : ''}${st.kern === false ? 'font-kerning:none;' : ''}`;
+      const raise = segRaise(st, s.size);
+      const baseline = raise ? ` baseline-shift="${n(raise)}"` : '';
+      // Horizontal scale: the run is drawn as its own <text> under scale(k 1), with its position and its
+      // tracking divided by k, so the glyphs are k times as wide and the tracking stays in points (as the
+      // engine measured it and the PDF writer's Tz draws it).
+      const k = hscaleOf(st);
+      const spc = st.spc ? st.spc / k : 0;
+      const base = `font-family:${escHtml(cssFamily(s.font))};font-size:${n(s.size)}px;${st.b ? 'font-weight:bold;' : ''}${st.i ? 'font-style:italic;' : ''}${deco ? `text-decoration:${deco};` : ''}${st.caps === 'small' ? 'font-variant:small-caps;' : ''}${spc ? `letter-spacing:${n(spc)}px;` : ''}${st.liga === false ? 'font-variant-ligatures:none;' : ''}${st.kern === false ? 'font-kerning:none;' : ''}`;
+      // Outline type: the glyphs stroked in the text colour and filled with paper.
+      const style = st.outline ? `${base}stroke:${color};stroke-width:${n(Math.max(0.25, s.size / 30))}px;stroke-linejoin:round;` : base;
+      const fill = st.outline ? '#ffffff' : color;
       if (st.highlight) { const hx = colorHex(d, st.highlight); parts.push(`<rect x="${n(l.x + s.x)}" y="${n(l.y - l.ascent)}" width="${n(s.w)}" height="${n(l.ascent * 1.25)}" fill="${hx}"/>`); }
+      const off = s.size / 12;
       if (s.drop) {
         const dy = l.y + (s.drop - 1) * l.height;
-        parts.push(`<text x="${n(l.x + s.x)}" y="${n(dy)}" fill="${color}" style="${style}" xml:space="preserve">${escHtml(s.text)}</text>`);
+        if (st.tshadow) parts.push(`<text x="${n(l.x + s.x + off)}" y="${n(dy + off)}" fill="${color}" fill-opacity="0.45" style="${base}" xml:space="preserve" class="qp-tshadow" pointer-events="none" aria-hidden="true">${escHtml(s.text)}</text>`);
+        parts.push(`<text x="${n(l.x + s.x)}" y="${n(dy)}" fill="${fill}" style="${style}" xml:space="preserve">${escHtml(s.text)}</text>`);
         continue;
       }
-      spans.push(`<tspan x="${n(l.x + s.x)}" fill="${color}" style="${style}"${baseline}>${escHtml(s.text)}</tspan>`);
+      if (k !== 1) {
+        const y = n(l.y - raise);
+        if (st.tshadow) parts.push(`<text transform="scale(${n(k)} 1)" x="${n((l.x + s.x + off) / k)}" y="${n(l.y - raise + off)}" fill="${color}" fill-opacity="0.45" style="${base}" xml:space="preserve" class="qp-tshadow" pointer-events="none" aria-hidden="true">${escHtml(s.text)}</text>`);
+        parts.push(`<text transform="scale(${n(k)} 1)" x="${n((l.x + s.x) / k)}" y="${y}" fill="${fill}" style="${style}" xml:space="preserve">${escHtml(s.text)}</text>`);
+        continue;
+      }
+      if (st.tshadow) shadows.push(`<tspan x="${n(l.x + s.x + off)}" y="${n(l.y + off)}" fill="${color}" fill-opacity="0.45" style="${base}"${baseline}>${escHtml(s.text)}</tspan>`);
+      spans.push(`<tspan x="${n(l.x + s.x)}" fill="${fill}" style="${style}"${baseline}>${escHtml(s.text)}</tspan>`);
     }
+    if (shadows.length) parts.push(`<text y="${n(l.y)}" xml:space="preserve" class="qp-tshadow" pointer-events="none" aria-hidden="true">${shadows.join('')}</text>`);
     if (spans.length) parts.push(`<text y="${n(l.y)}" xml:space="preserve" data-line="${l.para}:${l.start}"${l.footnoteId ? ` data-fn="${escHtml(l.footnoteId)}"` : ''}>${spans.join('')}</text>`);
     out.push(parts.join(''));
   }
@@ -334,8 +358,14 @@ function pathTextSvg(ctx: Ctx, e: PathTextItem): string {
   for (const g of r.glyphs) {
     const st = g.style;
     const deco = [st.u ? 'underline' : '', st.strike ? 'line-through' : ''].filter(Boolean).join(' ');
-    const style = `font-family:${escHtml(cssFamily(g.font))};font-size:${n(g.size)}px;${st.b ? 'font-weight:bold;' : ''}${st.i ? 'font-style:italic;' : ''}${deco ? `text-decoration:${deco};` : ''}${st.caps === 'small' ? 'font-variant:small-caps;' : ''}`;
-    glyphs.push(`<text transform="translate(${n(g.x)} ${n(g.y)}) rotate(${n(g.angle)})" text-anchor="middle" fill="${colorHex(d, st.color)}" style="${style}" data-glyph="1">${escHtml(g.ch)}</text>`);
+    const base = `font-family:${escHtml(cssFamily(g.font))};font-size:${n(g.size)}px;${st.b ? 'font-weight:bold;' : ''}${st.i ? 'font-style:italic;' : ''}${deco ? `text-decoration:${deco};` : ''}${st.caps === 'small' ? 'font-variant:small-caps;' : ''}`;
+    const color = colorHex(d, st.color);
+    const k = hscaleOf(st);
+    const tf = `translate(${n(g.x)} ${n(g.y)}) rotate(${n(g.angle)})${k !== 1 ? ` scale(${n(k)} 1)` : ''}`;
+    // Shadow type: an offset copy under the glyph (offset along the glyph's own axes); outline type: stroked, paper-filled.
+    if (st.tshadow) glyphs.push(`<text transform="${tf} translate(${n(g.size / 12)} ${n(g.size / 12)})" text-anchor="middle" fill="${color}" fill-opacity="0.45" style="${base}" pointer-events="none" aria-hidden="true">${escHtml(g.ch)}</text>`);
+    const style = st.outline ? `${base}stroke:${color};stroke-width:${n(Math.max(0.25, g.size / 30))}px;stroke-linejoin:round;` : base;
+    glyphs.push(`<text transform="${tf}" text-anchor="middle" fill="${st.outline ? '#ffffff' : color}" style="${style}" data-glyph="1">${escHtml(g.ch)}</text>`);
   }
   out.push(`<g class="qp-pathtext-glyphs">${glyphs.join('')}</g>`);
   // Footnotes referenced from the text: a note area under the item's box.

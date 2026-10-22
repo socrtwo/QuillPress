@@ -49,7 +49,7 @@ export const DEFAULT_TABS: RibbonTab[] = [
     id: 'text', label: 'Text', groups: [
       { id: 'frames', label: 'Text Frames', items: ['text.link', 'text.unlink', 'text.nextFrame', 'text.prevFrame', 'text.autoflow', 'text.threadsPane', 'text.splitStory'] },
       { id: 'frameOptions', label: 'Frame Options', items: ['text.columns', 'text.insets', 'text.verticalAlign', 'text.autosize', 'text.ignoreWrap', 'text.frameOptions'] },
-      { id: 'typography', label: 'Typography', items: ['fmt.tracking', 'fmt.kerning', 'fmt.ligatures', 'fmt.smallCaps', 'fmt.allCaps', 'fmt.baselineShift', 'fmt.hyphenation', 'fmt.baselineGridAlign', 'fmt.opticalMargin', 'text.opticalMarginStory', 'text.opticalMarginSize', 'fmt.tabs', 'fonts.manage'] },
+      { id: 'typography', label: 'Typography', items: ['fmt.tracking', 'fmt.kerning', 'fmt.ligatures', 'fmt.smallCaps', 'fmt.allCaps', 'fmt.outline', 'fmt.textShadow', 'fmt.baselineShift', 'fmt.baselineShiftPoints', 'fmt.hscale', 'fmt.hyphenation', 'fmt.baselineGridAlign', 'fmt.opticalMargin', 'text.opticalMarginStory', 'text.opticalMarginSize', 'fmt.tabs', 'fonts.manage'] },
       { id: 'flow', label: 'Paragraph Flow', items: ['fmt.keepWithNext', 'fmt.keepLines', 'fmt.ruleAbove', 'fmt.ruleBelow', 'fmt.paragraphDialog'] },
       { id: 'notes', label: 'Notes', items: ['text.insertFootnote', 'text.editFootnote', 'text.deleteFootnote', 'text.prevFootnote', 'text.nextFootnote', 'text.goToReference', 'text.footnotesToEndnotes', 'text.endnotesToFootnotes', 'text.footnotesPane'], launcher: 'text.footnoteOptions' },
       { id: 'tools', label: 'Tools', items: ['text.fitCopy', 'text.oversetReport', 'text.storyEditor', 'text.wordCount', 'text.changeCase', 'text.insertLorem', 'tools.convertQuotes'] },
@@ -60,7 +60,7 @@ export const DEFAULT_TABS: RibbonTab[] = [
       { id: 'order', label: 'Order', items: ['arrange.bringToFront', 'arrange.bringForward', 'arrange.sendBackward', 'arrange.sendToBack'] },
       { id: 'align', label: 'Align', items: ['arrange.align', 'arrange.alignLeft', 'arrange.alignCenter', 'arrange.alignRight', 'arrange.alignTop', 'arrange.alignMiddle', 'arrange.alignBottom', 'arrange.distributeH', 'arrange.distributeV', 'arrange.alignToPage'] },
       { id: 'group', label: 'Group', items: ['arrange.group', 'arrange.ungroup', 'arrange.lock', 'arrange.unlockAll', 'arrange.hide', 'arrange.showAll'] },
-      { id: 'rotate', label: 'Rotate', items: ['arrange.rotate', 'arrange.rotateLeft', 'arrange.rotateRight', 'arrange.flipH', 'arrange.flipV'] },
+      { id: 'rotate', label: 'Rotate', items: ['arrange.rotate', 'arrange.rotateLeft', 'arrange.rotateRight', 'arrange.flipH', 'arrange.flipV', 'arrange.skew'] },
       { id: 'wrap', label: 'Text Wrap', items: ['arrange.wrap', 'arrange.wrapNone', 'arrange.wrapSquare', 'arrange.wrapTight', 'arrange.wrapTopBottom', 'arrange.wrapOffset'] },
       { id: 'anchor', label: 'Anchor', items: ['arrange.anchorInline', 'arrange.anchorAbove', 'arrange.anchorCustom', 'arrange.releaseAnchor'], launcher: 'arrange.anchorOptions' },
       { id: 'size', label: 'Size and Position', items: ['arrange.sizeDialog', 'arrange.stepRepeat', 'arrange.layersPane', 'arrange.moveToLayer', 'arrange.makeSameSize'] },

@@ -55,10 +55,12 @@ function pathGeometryXml(subpaths: SubPath[]): string {
 const rectPoints = (w: number, h: number): SubPath[] => [{ pts: [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }], open: false }];
 
 /** ItemTransform of an item whose path lives in its own w × h box: center in spread space, rotation (degrees clockwise) and flips. */
-export function itemTransform(cx: number, cy: number, w: number, h: number, rot = 0, flipH = false, flipV = false): string {
+export function itemTransform(cx: number, cy: number, w: number, h: number, rot = 0, flipH = false, flipV = false, skew = 0): string {
   const t = (rot * Math.PI) / 180, cos = Math.cos(t), sin = Math.sin(t);
   const fx = flipH ? -1 : 1, fy = flipV ? -1 : 1;
-  const a = cos * fx, b = sin * fx, c = -sin * fy, d = cos * fy;
+  // Rotation · skew · flip, as the renderer applies them (skew leans the top to the right: x' = x − tan(s)·y).
+  const k = -Math.tan((skew * Math.PI) / 180);
+  const a = cos * fx, b = sin * fx, c = (cos * k - sin) * fy, d = (sin * k + cos) * fy;
   const tx = cx - (a * w) / 2 - (c * h) / 2, ty = cy - (b * w) / 2 - (d * h) / 2;
   return [a, b, c, d, tx, ty].map(n).join(' ');
 }
@@ -177,7 +179,7 @@ function pathTextXml(env: Env, p: PathTextItem, transform: string): string {
 /** XML of an item placed with its page's origin in spread space. */
 function itemXml(env: Env, item: Item, ox: number, oy: number): string {
   const cx = ox + item.x + item.w / 2, cy = oy + item.y + item.h / 2;
-  const t = itemTransform(cx, cy, item.w, item.h, item.rot || 0, item.flipH, item.flipV);
+  const t = itemTransform(cx, cy, item.w, item.h, item.rot || 0, item.flipH, item.flipV, item.skew || 0);
   switch (item.kind) {
     case 'text': { const story = env.pub.story(item.story); const storySelf = story ? addModelStory(env, story) : addStory(env, [], {}); return textFrameXml(env, item, t, storySelf); }
     case 'picture': return pictureXml(env, item, t);

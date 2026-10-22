@@ -1,10 +1,10 @@
 # QuillPress Command Reference
 
-QuillPress ships **544 commands**. Every one can be placed on the Quick Access Bar, added to a custom tab, bound to a keyboard shortcut, recorded in a macro, or found with command search (Alt+Q).
+QuillPress ships **549 commands**. Every one can be placed on the Quick Access Bar, added to a custom tab, bound to a keyboard shortcut, recorded in a macro, or found with command search (Alt+Q).
 
 176 of them are "Commands Not in the Tabs" — reachable through the Quick Access Bar chooser, Customize Tabs, the command search, or menus — so nothing the app can do is hidden.
 
-Of the 567 command ids named in [COMMANDS-PLAN.md](COMMANDS-PLAN.md), 544 are implemented and 23 are not yet; they are listed at the end of this file.
+Of the 572 command ids named in [COMMANDS-PLAN.md](COMMANDS-PLAN.md), 549 are implemented and 23 are not yet; they are listed at the end of this file.
 
 This file is generated from the source by `npm run catalog`; a unit test fails when it is out of date.
 
@@ -273,7 +273,7 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 | Page Background | Schemes |  | `page.background` |  |
 | Swatches | Schemes | F5 | `page.swatchesPane` |  |
 
-## Text (61)
+## Text (65)
 
 | Command | Group | Shortcut | ID | Notes |
 |---|---|---|---|---|
@@ -322,9 +322,11 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 | Align to Baseline Grid | Typography |  | `fmt.baselineGridAlign` |  |
 | All Caps | Typography | Ctrl+Shift+a | `fmt.allCaps` |  |
 | Baseline Shift | Typography |  | `fmt.baselineShift` |  |
+| Baseline Shift (pt) | Typography |  | `fmt.baselineShiftPoints` | inspired by Baseline shift (QuarkXPress, PageMaker) |
 | Fonts Used Report | Typography |  | `fonts.usedReport` | not in tabs |
 | Fonts… | Typography |  | `fonts.manage` |  |
 | Forget Packaged Fonts | Typography |  | `fonts.unpackage` | not in tabs |
+| Horizontal Scale | Typography |  | `fmt.hscale` | inspired by Horizontal scale (QuarkXPress, PageMaker set width) |
 | Hyphenate | Typography |  | `fmt.hyphenation` | inspired by TeX hyphenation |
 | Install Packaged Fonts | Typography |  | `fonts.installPackaged` | not in tabs |
 | Kerning | Typography |  | `fmt.kerning` |  |
@@ -332,14 +334,16 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 | Optical Margin Alignment | Typography |  | `fmt.opticalMargin` | inspired by Hanging punctuation (Gutenberg; InDesign optical margin alignment) |
 | Optical Margin Size… | Typography |  | `text.opticalMarginSize` |  |
 | Optical Margins for Story | Typography |  | `text.opticalMarginStory` |  |
+| Outline | Typography |  | `fmt.outline` | inspired by Outline type style (Macintosh, QuarkXPress, PageMaker) |
 | Package Fonts | Typography |  | `fonts.package` | not in tabs |
 | Remove Font… | Typography |  | `fonts.remove` | not in tabs |
+| Shadow | Typography |  | `fmt.textShadow` | inspired by Shadow type style (Macintosh, QuarkXPress, PageMaker) |
 | Small Caps | Typography | Ctrl+Shift+k | `fmt.smallCaps` |  |
 | Tabs… | Typography |  | `fmt.tabs` |  |
 | Text Language | Typography |  | `fmt.language` | not in tabs |
 | Tracking | Typography |  | `fmt.tracking` |  |
 
-## Arrange (81)
+## Arrange (82)
 
 | Command | Group | Shortcut | ID | Notes |
 |---|---|---|---|---|
@@ -375,6 +379,7 @@ This file is generated from the source by `npm run catalog`; a unit test fails w
 | Rotate | Rotate |  | `arrange.rotate` | has options menu |
 | Rotate Left 90° | Rotate |  | `arrange.rotateLeft` |  |
 | Rotate Right 90° | Rotate |  | `arrange.rotateRight` |  |
+| Skew | Rotate |  | `arrange.skew` | has options menu; inspired by Skew (QuarkXPress, PageMaker) |
 | Apply Swatch | Shape |  | `shape.applySwatch` | not in tabs |
 | Change Shape | Shape |  | `shape.change` | has options menu |
 | Convert to Picture Frame | Shape |  | `shape.convertToPicture` | not in tabs |

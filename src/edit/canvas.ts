@@ -150,7 +150,7 @@ export class Canvas {
       const e = o.items.find((x) => x.id === id)!;
       const b = boxOf(e);
       const frame = h('div', { class: 'qp-sel' + (this.editor?.frame.id === id ? ' qp-sel-editing' : '') + (e.locked ? ' qp-sel-locked' : '') + (e.anchored ? ' qp-sel-anchored' : ''), 'data-sel': id });
-      Object.assign(frame.style, { left: `${b.x + this.pad}px`, top: `${b.y + this.pad}px`, width: `${b.w}px`, height: `${b.h}px`, transform: b.rot ? `rotate(${b.rot}deg)` : '' });
+      Object.assign(frame.style, { left: `${b.x + this.pad}px`, top: `${b.y + this.pad}px`, width: `${b.w}px`, height: `${b.h}px`, transform: [b.rot ? `rotate(${b.rot}deg)` : '', e.skew ? `skewX(${-e.skew}deg)` : ''].filter(Boolean).join(' ') });
       frame.style.setProperty('--qp-inv', String(1 / this.zoom));
       if (single && !e.locked && !this.editor) {
         const isLine = e.kind === 'line';

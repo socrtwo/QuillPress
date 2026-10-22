@@ -318,8 +318,24 @@ export function baselineShift(pct: number | undefined, segSize: number): number 
   return pct ? (pct / 100) * (segSize / SHIFTED_SIZE) : 0;
 }
 
+/** Horizontal glyph scale of a run as a factor (RunProps.hscale is percent; 1 = normal). */
+export function hscaleOf(st: RunProps): number {
+  return st.hscale && st.hscale > 0 && st.hscale !== 100 ? st.hscale / 100 : 1;
+}
+
+/**
+ * The whole raise of a segment's baseline in points (positive up): the superscript/subscript offset
+ * (RunProps.baseline) plus the run's own baseline shift in points (RunProps.shift). The engine's line
+ * metrics, the screen and the PDF writer all use this.
+ */
+export function segRaise(st: RunProps, segSize: number): number {
+  return baselineShift(st.baseline, segSize) + (st.shift ?? 0);
+}
+
 export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult {
   const m = o.measure || measure;
+  // Widths of text in a token's or segment's style: the run's horizontal scale stretches its glyphs.
+  const mw = (text: string, t: { css: string; style: RunProps }) => m(text, t.css) * hscaleOf(t.style);
   const fontOf = o.font || ((f) => f || 'Tinos');
   const tabInt = o.tabInterval || 36;
   const lines: LaidLine[] = [];
@@ -402,7 +418,7 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
       }
       if (r.footnote) {
         const text = r.text || '1';
-        toks.push({ text, style: s, size, font: fam, css, run: ri, off, space: false, w: m(text, css), footnote: r.footnote });
+        toks.push({ text, style: s, size, font: fam, css, run: ri, off, space: false, w: m(text, css) * hscaleOf(s), footnote: r.footnote });
         off += r.text.length;
         return;
       }
@@ -415,7 +431,7 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
         if (!part) continue;
         const tab = part === '\t';
         const space = !tab && /^\s+$/.test(part);
-        const w = tab ? 0 : m(part, css) + (s.spc ? s.spc * part.length : 0);
+        const w = tab ? 0 : m(part, css) * hscaleOf(s) + (s.spc ? s.spc * part.length : 0);
         toks.push({ text: part, style: s, size, font: fam, css, run: ri, off: pos, tab, space, w });
         pos += part.length;
       }
@@ -442,13 +458,13 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
       const lh = firstSize * leadingPct;
       const dsize = lh * drop.lines * 0.95;
       const dcss = cssFont(firstTok.style, dsize, firstTok.font);
-      dropW = m(text, dcss) + 2;
+      dropW = m(text, dcss) * hscaleOf(firstTok.style) + 2;
       dropSeg = { text, x: 0, w: dropW, style: firstTok.style, size: dsize, font: firstTok.font, css: dcss, run: firstTok.run, off: firstTok.off, drop: drop.lines };
       dropLines = drop.lines;
       // Remove the characters from the first token.
       firstTok.text = firstTok.text.slice(chars);
       firstTok.off += chars;
-      firstTok.w = m(firstTok.text, firstTok.css);
+      firstTok.w = mw(firstTok.text, firstTok);
       if (!firstTok.text) toks.splice(toks.indexOf(firstTok), 1);
     }
 
@@ -473,7 +489,7 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
       let above = height * 0.8, below = height * 0.2;
       for (const t of lineToks) {
         // A raised or lowered run must stay clear of the lines above and below.
-        const shift = t.anchor || t.br ? 0 : baselineShift(t.style.baseline, t.size);
+        const shift = t.anchor || t.br ? 0 : segRaise(t.style, t.size);
         if (shift > 0) above = Math.max(above, shift + t.size * 0.92);
         else if (shift < 0) below = Math.max(below, -shift + t.size * 0.25);
         const a = t.anchor;
@@ -527,7 +543,7 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
         // The line does not fit: move the whole paragraph if it has only started, else just this line.
         return 'moved';
       }
-      for (const [t, label] of labels) { t.text = label; t.w = m(label, t.css); }
+      for (const [t, label] of labels) { t.text = label; t.w = mw(label, t); }
       let x0 = box.x + (first ? firstIndent : marL) + (lineNo < dropLines ? dropW : 0);
       let avail = box.w - (first ? firstIndent : marL) - marR - (lineNo < dropLines ? dropW : 0);
       // Exclusions: use the widest free range crossing the line band.
@@ -564,12 +580,12 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
         const fs = textSegs[0], ls = textSegs[textSegs.length - 1];
         if (fs && !(first && (bText || dropSeg)) && fs.x < 0.01) {
           const ch = [...fs.text][0];
-          hangL = hangAmount(ch, 'left', m(ch, fs.css), fs.size, opticalSize);
+          hangL = hangAmount(ch, 'left', mw(ch, fs), fs.size, opticalSize);
         }
         if (ls) {
           const chars = [...ls.text];
           const ch = chars[chars.length - 1];
-          hangR = hangAmount(ch, 'right', m(ch, ls.css), ls.size, opticalSize);
+          hangR = hangAmount(ch, 'right', mw(ch, ls), ls.size, opticalSize);
         }
         x0 -= hangL; left = x0; avail += hangL + hangR;
       }
@@ -675,14 +691,14 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
         if (st.hyphenate !== false && t.text.length >= 6 && !t.footnote) {
           const pts = hyphenPoints(t.text);
           let best = -1;
-          for (const pt of pts) { const hw = m(t.text.slice(0, pt) + '-', t.css); if (lineW + hw <= avail) best = pt; else break; }
+          for (const pt of pts) { const hw = mw(t.text.slice(0, pt) + '-', t); if (lineW + hw <= avail) best = pt; else break; }
           if (best > 0) {
-            lineToks.push({ ...t, text: t.text.slice(0, best) + '-', w: m(t.text.slice(0, best) + '-', t.css) });
+            lineToks.push({ ...t, text: t.text.slice(0, best) + '-', w: mw(t.text.slice(0, best) + '-', t) });
             const fr = flushLine(false);
             if (fr === 'stop') break outer;
             if (fr === 'rewind') { ti = rewindTo - 1; lineW = 0; continue; }
             const rest = t.text.slice(best);
-            toks.splice(ti + 1, 0, { ...t, text: rest, off: t.off + best, w: m(rest, t.css) });
+            toks.splice(ti + 1, 0, { ...t, text: rest, off: t.off + best, w: mw(rest, t) });
             lineW = 0;
             continue;
           }
@@ -699,10 +715,10 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
           let chunk = '';
           let coff = t.off;
           for (const ch of t.text) {
-            const cw = m(chunk + ch, t.css);
+            const cw = mw(chunk + ch, t);
             if (cw > avail2 - lineW && chunk) {
               startLine();
-              lineToks.push({ ...t, text: chunk, off: coff, w: m(chunk, t.css) });
+              lineToks.push({ ...t, text: chunk, off: coff, w: mw(chunk, t) });
               // A line that ends inside the broken word stays as broken (its chunks are not tokens).
               lineStart = -2;
               if (flushLine(false) === 'stop') break outer;
@@ -710,7 +726,7 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
               chunk = ch; lineW = 0;
             } else chunk += ch;
           }
-          if (chunk) { if (!lineToks.length) lineStart = -2; lineToks.push({ ...t, text: chunk, off: coff, w: m(chunk, t.css) }); lineW += m(chunk, t.css); }
+          if (chunk) { if (!lineToks.length) lineStart = -2; lineToks.push({ ...t, text: chunk, off: coff, w: mw(chunk, t) }); lineW += mw(chunk, t); }
           continue;
         }
         startLine();

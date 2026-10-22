@@ -255,4 +255,27 @@ describe('IDML export', () => {
     expect(itemTransform(50, 25, 100, 50, 90).split(' ').map(Number).map((v) => Math.round(v * 1000) / 1000)).toEqual([0, 1, -1, 0, 75, -25]);
     expect(itemTransform(50, 25, 100, 50, 0, true).split(' ').map(Number)).toEqual([-1, 0, 0, 1, 100, 0]);
   });
+
+  it('round-trips skew, horizontal scale, baseline shift and outline type', async () => {
+    const p = Pub.blank({ w: 612, h: 792 }, { pages: 1 });
+    const f = p.newTextFrame({ x: 72, y: 72, w: 300, h: 100 }, [{ style: 'Body', runs: [{ text: 'Wide ', hscale: 150 }, { text: 'up', shift: 3 }, { text: ' hollow', outline: true, color: '#C00000', size: 20 }] }]);
+    p.pages[0].items.push(f);
+    p.pages[0].items.push({ id: 'sk', kind: 'shape', geom: 'rect', x: 100, y: 300, w: 120, h: 60, skew: 20, fill: { type: 'solid', color: 'Black' } });
+    p.pages[0].items.push({ id: 'skr', kind: 'shape', geom: 'rect', x: 300, y: 300, w: 120, h: 60, skew: -15, rot: 30, fill: { type: 'solid', color: 'Black' } });
+    const { pub } = await importIdml(await exportIdml(p));
+    const runs = pub.story(pub.textFrames()[0].story)!.paras[0].runs;
+    expect(runs.find((r) => r.text.startsWith('Wide'))?.hscale).toBe(150);
+    expect(runs.find((r) => r.text === 'up')?.shift).toBe(3);
+    const hollow = runs.find((r) => r.text.includes('hollow'))!;
+    expect(hollow.outline).toBe(true);
+    const sw = pub.data.swatches.find((c) => c.name === hollow.color);
+    expect(String(sw ? sw.color : hollow.color).toUpperCase()).toContain('C00000');
+    const shapes = pub.pages[0].items.filter((e) => e.kind === 'shape');
+    const a = shapes.find((e) => Math.abs(e.x - 100) < 0.5)!, b = shapes.find((e) => Math.abs(e.x - 300) < 0.5)!;
+    expect(a.skew).toBeCloseTo(20, 1);
+    expect([a.y, a.w, a.h].map((v) => Math.round(v))).toEqual([300, 120, 60]);
+    expect(b.skew).toBeCloseTo(-15, 1);
+    expect(b.rot).toBeCloseTo(30, 1);
+    expect([b.y, b.w, b.h].map((v) => Math.round(v))).toEqual([300, 120, 60]);
+  });
 });
