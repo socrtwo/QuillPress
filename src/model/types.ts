@@ -54,6 +54,14 @@ export interface RunProps {
   caps?: 'all' | 'small' | 'none';
   /** Tracking (character spacing) in points. */
   spc?: number;
+  /** Baseline shift in points (positive raises), at full size; independent of superscript/subscript. */
+  shift?: number;
+  /** Horizontal scale of the glyphs, percent (100 = normal). */
+  hscale?: number;
+  /** Outline type: the glyphs are stroked in the text colour and filled with paper (white). */
+  outline?: boolean;
+  /** Shadow type: a copy of the glyphs offset down and right by about 1/12 of the size, in grey. */
+  tshadow?: boolean;
   /** Kerning pairs on (default on). */
   kern?: boolean;
   /** Ligatures on (default on). */
@@ -190,6 +198,8 @@ export interface ItemBase {
   h: number;
   /** Degrees, clockwise. */
   rot?: number;
+  /** Horizontal skew in degrees about the item's centre (positive leans the top to the right). */
+  skew?: number;
   flipH?: boolean;
   flipV?: boolean;
   locked?: boolean;
