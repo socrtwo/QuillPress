@@ -560,9 +560,7 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
       for (const t of lineToks) {
         if (t.br) continue;
         if (t.tab) {
-          const stops = (st.tabs || []).map((tb: Tab) => tb.pos).filter((pz) => pz > x + 0.5);
-          const nextStop = stops.length ? stops[0] : (Math.floor(x / tabInt) + 1) * tabInt;
-          x = Math.min(nextStop, avail);
+          x = Math.min(tabTo(x, first, lineNo), avail);
           continue;
         }
         const w = t.w;
@@ -636,6 +634,17 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
     };
 
     // Measure helpers for the available width of the next line (before placing it).
+    // Tab stops are measured from the frame's text edge (the box's left), not from where the line
+    // starts; a hanging indent is itself a stop on the first line, as in other layout programs.
+    // `x` is the position relative to the line's start; the result is the next position, same origin.
+    const tabTo = (x: number, fst: boolean, ln: number): number => {
+      const origin = (fst ? firstIndent : marL) + (ln < dropLines ? dropW : 0);
+      const abs = origin + x;
+      const stops = (st.tabs || []).map((tb: Tab) => tb.pos).filter((pz: number) => pz > abs + 0.5);
+      if (fst && indent < 0 && marL > abs + 0.5 && (!stops.length || marL < stops[0])) stops.unshift(marL);
+      const next = stops.length ? stops[0] : (Math.floor(abs / tabInt + 1e-6) + 1) * tabInt;
+      return next - origin;
+    };
     const availFor = (fst: boolean, ln: number): number => {
       const g = lineGeom(fst, ln);
       const baseline = y + g.above;
@@ -683,7 +692,7 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
     for (ti = startTi; ti < toks.length; ti++) {
       const t = toks[ti];
       if (t.br) { startLine(); lineToks.push(t); const fr = flushLine(false); if (fr === 'stop') break outer; lineW = 0; if (fr === 'rewind') ti = rewindTo - 1; continue; }
-      if (t.tab) { startLine(); lineToks.push(t); const stops = (st.tabs || []).map((tb) => tb.pos).filter((pz) => pz > lineW + 0.5); lineW = stops.length ? stops[0] : (Math.floor(lineW / tabInt) + 1) * tabInt; continue; }
+      if (t.tab) { startLine(); lineToks.push(t); lineW = tabTo(lineW, first, lineNo); continue; }
       const avail = availFor(first, lineNo);
       const w = t.w;
       if (!t.space && lineW + w > avail + 0.01 && lineToks.some((x) => !x.space && !x.tab)) {

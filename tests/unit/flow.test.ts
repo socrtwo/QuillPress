@@ -21,6 +21,18 @@ describe('text layout', () => {
     expect(r.overset).toBeUndefined();
   });
 
+  it('measures tab stops from the frame edge and stops at a hanging indent', () => {
+    const boxes = [{ frame: 'f', col: 0, x: 10, y: 0, w: 400, h: 200, page: 0 }];
+    const lay = (props: any, text: string) => layoutStory(parasFromText(text), { boxes, resolve: () => ({ props, run: { size: 12, font: 'Tinos' } }), resolveRun: (b: any, x: any) => ({ ...b, ...x }) } as any);
+    const at = (r: ReturnType<typeof lay>, word: string) => { for (const l of r.lines) for (const sg of l.segs) if (sg.text === word) return l.x + sg.x; return NaN; };
+    // A hanging indent is a stop: the text after the number lines up with the left indent.
+    expect(at(lay({ marL: 36, indent: -36 }, '1.\tFirst'), 'First')).toBeCloseTo(10 + 36, 3);
+    // A stop at 120 is 120 from the frame's text edge, whatever the paragraph's left indent.
+    expect(at(lay({ marL: 50, tabs: [{ pos: 120, align: 'l' }] }, 'a\tb'), 'b')).toBeCloseTo(10 + 120, 3);
+    // Default stops are multiples of the interval from the frame edge too.
+    expect(at(lay({ marL: 20 }, 'a\tb'), 'b')).toBeCloseTo(10 + 36, 3);
+  });
+
   it('reports overset when text does not fit', () => {
     const boxes = [{ frame: 'f', col: 0, x: 0, y: 0, w: 200, h: 40, page: 0 }];
     const r = layoutStory(parasFromText(long), { boxes, resolve: () => ({ props: {}, run: { size: 12 } }), resolveRun: (b: any, x: any) => ({ ...b, ...x }) } as any);
