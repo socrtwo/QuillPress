@@ -40,7 +40,10 @@ describe.skipIf(!has)('QuarkXPress corpus', () => {
     expect(frames).toHaveLength(6);
     const big = frames.find((f) => storyText(r, f).startsWith('Lorem ipsum dolor sit amet'))!;
     expect(big).toBeTruthy();
-    expect(big.w).toBeCloseTo(349.88, 1);
+    // QuarkXPress draws frames inside the box: the 1 pt frame takes half a point off each side of the
+    // outline QuillPress strokes, and the text is inset by the other half on top of the box inset.
+    expect(big.w).toBeCloseTo(348.88, 1);
+    expect(big.insets).toEqual([1.5, 1.5, 1.5, 1.5]);
     expect(big.line?.width).toBe(1);
     const rotated = frames.find((f) => f.rot)!;
     expect(rotated.rot).toBe(-35);
@@ -87,12 +90,18 @@ describe.skipIf(!has)('QuarkXPress corpus', () => {
     const d = await load('3.3_mac-dashes');
     const lines = items(d).filter((i): i is LineItem => i.kind === 'line');
     expect(lines).toHaveLength(8);
-    expect(new Set(lines.map((l) => l.line?.dash || 'solid'))).toContain('dash');
+    // Dash styles map to the closest preset in line widths; stripes (parallel lines) draw solid.
+    expect(new Set(lines.map((l) => l.line?.dash || 'solid'))).toContain('sysDash');
+    expect(new Set(lines.map((l) => l.line?.dash || 'solid'))).toContain('dashDot');
+    expect(lines.filter((l) => !l.line?.dash).length).toBeGreaterThanOrEqual(2);
     expect(new Set(lines.map((l) => l.line?.dash || 'solid'))).toContain('dot');
     const a = await load('4.0_win-arrows.qxd');
     const arrows = items(a).filter((i): i is LineItem => i.kind === 'line');
     expect(arrows.some((l) => l.line?.head && !l.line.tail)).toBe(true);
     expect(arrows.some((l) => l.line?.head && l.line.tail)).toBe(true);
+    // Arrow type 1 puts the arrowhead at the line's end, 2 at its start; 3 and 4 add a tail feather.
+    expect(arrows.some((l) => l.line?.tail === 'triangle' && !l.line.head)).toBe(true);
+    expect(arrows.some((l) => l.line?.head === 'diamond' && l.line.tail === 'triangle')).toBe(true);
   });
 
   it('4.x lines take their color from the frame record, not the box color', async () => {
@@ -114,15 +123,19 @@ describe.skipIf(!has)('QuarkXPress corpus', () => {
     expect(r.textOnly).toBe(false);
     expect(items(r).map((i) => i.kind).sort()).toEqual(['line', 'line', 'picture', 'picture', 'picture', 'text']);
     const poly = await load('shape-31-2');
-    const box = items(poly)[0] as PictureFrame;
-    expect(box.kind).toBe('picture');
+    // A polygon picture box is its outline grouped with the picture frame.
+    const grp = items(poly)[0] as GroupItem;
+    expect(grp.kind).toBe('group');
+    expect(grp.children.map((c) => c.kind)).toEqual(['shape', 'picture']);
+    expect((grp.children[0] as ShapeItem).geom).toBe('custom');
     expect(poly.warnings.some((w) => /could not be read/.test(w))).toBe(false);
   });
 
   it('3.3 picture boxes linked to a file carry the file record and name', async () => {
     const r = await load('test.qxd');
     expect(r.textOnly).toBe(false);
-    const pics = items(r).filter((i): i is PictureFrame => i.kind === 'picture');
+    const flat = (list: GroupItem['children']): GroupItem['children'] => list.flatMap((i) => (i.kind === 'group' ? [i, ...flat(i.children)] : [i]));
+    const pics = flat(items(r)).filter((i): i is PictureFrame => i.kind === 'picture');
     expect(pics).toHaveLength(8);
     expect(pics.some((p) => p.name?.includes('bikers.pcx'))).toBe(true);
     expect(items(r).filter((i) => i.kind === 'text')).toHaveLength(4);

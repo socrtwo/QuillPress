@@ -11,7 +11,7 @@ import { pubToPdf, lastPdfWarnings } from '../../src/export/pdf';
 /** Reads a bundled WOFF from node_modules by the file name in its URL (vitest cannot fetch). */
 const fontLoader = async (url: string): Promise<Uint8Array> => {
   const file = basename(url.split('?')[0]);
-  const pkg = file.split('-latin-')[0];
+  const pkg = file.split(/-(?:latin|cyrillic|greek)-/)[0];
   return new Uint8Array(readFileSync(`node_modules/@fontsource/${pkg}/files/${file}`));
 };
 
@@ -25,7 +25,7 @@ function pubWithFonts(): Pub {
   frame(90, 'Arimo', 'Arimo bold italic', { b: true, i: true });
   frame(140, 'Arial', 'Arial becomes Arimo');
   frame(190, 'Calibri', 'Calibri becomes Carlito; small caps', { caps: 'small' });
-  frame(240, 'Wingdings', 'Not bundled: standard font');
+  frame(240, 'Wingdings', 'Not bundled: the screen fallback face');
   frame(290, 'Tinos', 'Missing glyphs fall back: 漢字 and ✓', { spc: 0.5 });
   return p;
 }
@@ -130,12 +130,14 @@ describe('embedded fonts in PDF export', () => {
     expect(s).toMatch(/\/BaseFont \/[A-Z]{6}\+Carlito/);
     expect(s).toContain('beginbfchar');
     expect(s).toContain('/Length1');
-    // Wingdings is not bundled: standard Helvetica; missing CJK glyphs use Times for that piece only.
-    expect(s).toContain('/BaseFont /Helvetica');
+    // Wingdings is not bundled: printed in Carlito, the face the screen falls back to, with a warning;
+    // glyphs no bundled face has (CJK, check mark) use Times for that piece only and are counted.
+    expect(s).not.toContain('/BaseFont /Helvetica');
     expect(s).toContain('/BaseFont /Times-Roman');
     expect(s).toMatch(/<[0-9a-f]{8,}> Tj/);
-    expect(warnings).toEqual([]);
-    expect(lastPdfWarnings()).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/Wingdings is not available to the PDF writer; its text is printed in Carlito/);
+    expect(lastPdfWarnings()).toEqual([warnings[0], '3 characters had no glyph in the embedded fonts and print as "?" in the PDF.']);
     // Every indirect reference resolves and the cross-reference table counts every object.
     const objs = new Set([...s.matchAll(/(\d+) 0 obj/g)].map((m) => +m[1]));
     for (const m of s.matchAll(/(\d+) 0 R/g)) expect(objs.has(+m[1]), `object ${m[1]}`).toBe(true);

@@ -52,6 +52,57 @@ import open_sans_400_italic from '@fontsource/open-sans/files/open-sans-latin-40
 import open_sans_700_normal from '@fontsource/open-sans/files/open-sans-latin-700-normal.woff?url';
 import open_sans_700_italic from '@fontsource/open-sans/files/open-sans-latin-700-italic.woff?url';
 
+// Extended subsets of the four metric-compatible core families: the PDF writer takes characters the
+// latin files lack (accented Latin beyond Western Europe, Cyrillic, Greek) from these.
+import tinos_latin_ext_400_normal from '@fontsource/tinos/files/tinos-latin-ext-400-normal.woff?url';
+import tinos_latin_ext_400_italic from '@fontsource/tinos/files/tinos-latin-ext-400-italic.woff?url';
+import tinos_latin_ext_700_normal from '@fontsource/tinos/files/tinos-latin-ext-700-normal.woff?url';
+import tinos_latin_ext_700_italic from '@fontsource/tinos/files/tinos-latin-ext-700-italic.woff?url';
+import tinos_cyrillic_400_normal from '@fontsource/tinos/files/tinos-cyrillic-400-normal.woff?url';
+import tinos_cyrillic_400_italic from '@fontsource/tinos/files/tinos-cyrillic-400-italic.woff?url';
+import tinos_cyrillic_700_normal from '@fontsource/tinos/files/tinos-cyrillic-700-normal.woff?url';
+import tinos_cyrillic_700_italic from '@fontsource/tinos/files/tinos-cyrillic-700-italic.woff?url';
+import tinos_greek_400_normal from '@fontsource/tinos/files/tinos-greek-400-normal.woff?url';
+import tinos_greek_400_italic from '@fontsource/tinos/files/tinos-greek-400-italic.woff?url';
+import tinos_greek_700_normal from '@fontsource/tinos/files/tinos-greek-700-normal.woff?url';
+import tinos_greek_700_italic from '@fontsource/tinos/files/tinos-greek-700-italic.woff?url';
+import arimo_latin_ext_400_normal from '@fontsource/arimo/files/arimo-latin-ext-400-normal.woff?url';
+import arimo_latin_ext_400_italic from '@fontsource/arimo/files/arimo-latin-ext-400-italic.woff?url';
+import arimo_latin_ext_700_normal from '@fontsource/arimo/files/arimo-latin-ext-700-normal.woff?url';
+import arimo_latin_ext_700_italic from '@fontsource/arimo/files/arimo-latin-ext-700-italic.woff?url';
+import arimo_cyrillic_400_normal from '@fontsource/arimo/files/arimo-cyrillic-400-normal.woff?url';
+import arimo_cyrillic_400_italic from '@fontsource/arimo/files/arimo-cyrillic-400-italic.woff?url';
+import arimo_cyrillic_700_normal from '@fontsource/arimo/files/arimo-cyrillic-700-normal.woff?url';
+import arimo_cyrillic_700_italic from '@fontsource/arimo/files/arimo-cyrillic-700-italic.woff?url';
+import arimo_greek_400_normal from '@fontsource/arimo/files/arimo-greek-400-normal.woff?url';
+import arimo_greek_400_italic from '@fontsource/arimo/files/arimo-greek-400-italic.woff?url';
+import arimo_greek_700_normal from '@fontsource/arimo/files/arimo-greek-700-normal.woff?url';
+import arimo_greek_700_italic from '@fontsource/arimo/files/arimo-greek-700-italic.woff?url';
+import cousine_latin_ext_400_normal from '@fontsource/cousine/files/cousine-latin-ext-400-normal.woff?url';
+import cousine_latin_ext_400_italic from '@fontsource/cousine/files/cousine-latin-ext-400-italic.woff?url';
+import cousine_latin_ext_700_normal from '@fontsource/cousine/files/cousine-latin-ext-700-normal.woff?url';
+import cousine_latin_ext_700_italic from '@fontsource/cousine/files/cousine-latin-ext-700-italic.woff?url';
+import cousine_cyrillic_400_normal from '@fontsource/cousine/files/cousine-cyrillic-400-normal.woff?url';
+import cousine_cyrillic_400_italic from '@fontsource/cousine/files/cousine-cyrillic-400-italic.woff?url';
+import cousine_cyrillic_700_normal from '@fontsource/cousine/files/cousine-cyrillic-700-normal.woff?url';
+import cousine_cyrillic_700_italic from '@fontsource/cousine/files/cousine-cyrillic-700-italic.woff?url';
+import cousine_greek_400_normal from '@fontsource/cousine/files/cousine-greek-400-normal.woff?url';
+import cousine_greek_400_italic from '@fontsource/cousine/files/cousine-greek-400-italic.woff?url';
+import cousine_greek_700_normal from '@fontsource/cousine/files/cousine-greek-700-normal.woff?url';
+import cousine_greek_700_italic from '@fontsource/cousine/files/cousine-greek-700-italic.woff?url';
+import carlito_latin_ext_400_normal from '@fontsource/carlito/files/carlito-latin-ext-400-normal.woff?url';
+import carlito_latin_ext_400_italic from '@fontsource/carlito/files/carlito-latin-ext-400-italic.woff?url';
+import carlito_latin_ext_700_normal from '@fontsource/carlito/files/carlito-latin-ext-700-normal.woff?url';
+import carlito_latin_ext_700_italic from '@fontsource/carlito/files/carlito-latin-ext-700-italic.woff?url';
+import carlito_cyrillic_400_normal from '@fontsource/carlito/files/carlito-cyrillic-400-normal.woff?url';
+import carlito_cyrillic_400_italic from '@fontsource/carlito/files/carlito-cyrillic-400-italic.woff?url';
+import carlito_cyrillic_700_normal from '@fontsource/carlito/files/carlito-cyrillic-700-normal.woff?url';
+import carlito_cyrillic_700_italic from '@fontsource/carlito/files/carlito-cyrillic-700-italic.woff?url';
+import carlito_greek_400_normal from '@fontsource/carlito/files/carlito-greek-400-normal.woff?url';
+import carlito_greek_400_italic from '@fontsource/carlito/files/carlito-greek-400-italic.woff?url';
+import carlito_greek_700_normal from '@fontsource/carlito/files/carlito-greek-700-normal.woff?url';
+import carlito_greek_700_italic from '@fontsource/carlito/files/carlito-greek-700-italic.woff?url';
+
 export interface WoffSource { family: string; weight: 400 | 700; style: 'normal' | 'italic'; url: string }
 
 export const WOFF_SOURCES: WoffSource[] = [
@@ -108,4 +159,62 @@ export const WOFF_SOURCES: WoffSource[] = [
 /** The source of a face, or null when the family is not bundled. */
 export function woffSource(family: string, weight: 400 | 700, style: 'normal' | 'italic'): WoffSource | null {
   return WOFF_SOURCES.find((s) => s.family === family && s.weight === weight && s.style === style) || null;
+}
+
+export interface SubsetSource extends WoffSource { subset: 'latin-ext' | 'cyrillic' | 'greek' }
+
+export const SUBSET_SOURCES: SubsetSource[] = [
+  { family: 'Tinos', subset: 'latin-ext', weight: 400, style: 'normal', url: tinos_latin_ext_400_normal },
+  { family: 'Tinos', subset: 'latin-ext', weight: 400, style: 'italic', url: tinos_latin_ext_400_italic },
+  { family: 'Tinos', subset: 'latin-ext', weight: 700, style: 'normal', url: tinos_latin_ext_700_normal },
+  { family: 'Tinos', subset: 'latin-ext', weight: 700, style: 'italic', url: tinos_latin_ext_700_italic },
+  { family: 'Tinos', subset: 'cyrillic', weight: 400, style: 'normal', url: tinos_cyrillic_400_normal },
+  { family: 'Tinos', subset: 'cyrillic', weight: 400, style: 'italic', url: tinos_cyrillic_400_italic },
+  { family: 'Tinos', subset: 'cyrillic', weight: 700, style: 'normal', url: tinos_cyrillic_700_normal },
+  { family: 'Tinos', subset: 'cyrillic', weight: 700, style: 'italic', url: tinos_cyrillic_700_italic },
+  { family: 'Tinos', subset: 'greek', weight: 400, style: 'normal', url: tinos_greek_400_normal },
+  { family: 'Tinos', subset: 'greek', weight: 400, style: 'italic', url: tinos_greek_400_italic },
+  { family: 'Tinos', subset: 'greek', weight: 700, style: 'normal', url: tinos_greek_700_normal },
+  { family: 'Tinos', subset: 'greek', weight: 700, style: 'italic', url: tinos_greek_700_italic },
+  { family: 'Arimo', subset: 'latin-ext', weight: 400, style: 'normal', url: arimo_latin_ext_400_normal },
+  { family: 'Arimo', subset: 'latin-ext', weight: 400, style: 'italic', url: arimo_latin_ext_400_italic },
+  { family: 'Arimo', subset: 'latin-ext', weight: 700, style: 'normal', url: arimo_latin_ext_700_normal },
+  { family: 'Arimo', subset: 'latin-ext', weight: 700, style: 'italic', url: arimo_latin_ext_700_italic },
+  { family: 'Arimo', subset: 'cyrillic', weight: 400, style: 'normal', url: arimo_cyrillic_400_normal },
+  { family: 'Arimo', subset: 'cyrillic', weight: 400, style: 'italic', url: arimo_cyrillic_400_italic },
+  { family: 'Arimo', subset: 'cyrillic', weight: 700, style: 'normal', url: arimo_cyrillic_700_normal },
+  { family: 'Arimo', subset: 'cyrillic', weight: 700, style: 'italic', url: arimo_cyrillic_700_italic },
+  { family: 'Arimo', subset: 'greek', weight: 400, style: 'normal', url: arimo_greek_400_normal },
+  { family: 'Arimo', subset: 'greek', weight: 400, style: 'italic', url: arimo_greek_400_italic },
+  { family: 'Arimo', subset: 'greek', weight: 700, style: 'normal', url: arimo_greek_700_normal },
+  { family: 'Arimo', subset: 'greek', weight: 700, style: 'italic', url: arimo_greek_700_italic },
+  { family: 'Cousine', subset: 'latin-ext', weight: 400, style: 'normal', url: cousine_latin_ext_400_normal },
+  { family: 'Cousine', subset: 'latin-ext', weight: 400, style: 'italic', url: cousine_latin_ext_400_italic },
+  { family: 'Cousine', subset: 'latin-ext', weight: 700, style: 'normal', url: cousine_latin_ext_700_normal },
+  { family: 'Cousine', subset: 'latin-ext', weight: 700, style: 'italic', url: cousine_latin_ext_700_italic },
+  { family: 'Cousine', subset: 'cyrillic', weight: 400, style: 'normal', url: cousine_cyrillic_400_normal },
+  { family: 'Cousine', subset: 'cyrillic', weight: 400, style: 'italic', url: cousine_cyrillic_400_italic },
+  { family: 'Cousine', subset: 'cyrillic', weight: 700, style: 'normal', url: cousine_cyrillic_700_normal },
+  { family: 'Cousine', subset: 'cyrillic', weight: 700, style: 'italic', url: cousine_cyrillic_700_italic },
+  { family: 'Cousine', subset: 'greek', weight: 400, style: 'normal', url: cousine_greek_400_normal },
+  { family: 'Cousine', subset: 'greek', weight: 400, style: 'italic', url: cousine_greek_400_italic },
+  { family: 'Cousine', subset: 'greek', weight: 700, style: 'normal', url: cousine_greek_700_normal },
+  { family: 'Cousine', subset: 'greek', weight: 700, style: 'italic', url: cousine_greek_700_italic },
+  { family: 'Carlito', subset: 'latin-ext', weight: 400, style: 'normal', url: carlito_latin_ext_400_normal },
+  { family: 'Carlito', subset: 'latin-ext', weight: 400, style: 'italic', url: carlito_latin_ext_400_italic },
+  { family: 'Carlito', subset: 'latin-ext', weight: 700, style: 'normal', url: carlito_latin_ext_700_normal },
+  { family: 'Carlito', subset: 'latin-ext', weight: 700, style: 'italic', url: carlito_latin_ext_700_italic },
+  { family: 'Carlito', subset: 'cyrillic', weight: 400, style: 'normal', url: carlito_cyrillic_400_normal },
+  { family: 'Carlito', subset: 'cyrillic', weight: 400, style: 'italic', url: carlito_cyrillic_400_italic },
+  { family: 'Carlito', subset: 'cyrillic', weight: 700, style: 'normal', url: carlito_cyrillic_700_normal },
+  { family: 'Carlito', subset: 'cyrillic', weight: 700, style: 'italic', url: carlito_cyrillic_700_italic },
+  { family: 'Carlito', subset: 'greek', weight: 400, style: 'normal', url: carlito_greek_400_normal },
+  { family: 'Carlito', subset: 'greek', weight: 400, style: 'italic', url: carlito_greek_400_italic },
+  { family: 'Carlito', subset: 'greek', weight: 700, style: 'normal', url: carlito_greek_700_normal },
+  { family: 'Carlito', subset: 'greek', weight: 700, style: 'italic', url: carlito_greek_700_italic },
+];
+
+/** The extended subsets of a core family (Tinos, Arimo, Cousine, Carlito) for a weight and style. */
+export function subsetSources(family: string, weight: 400 | 700, style: 'normal' | 'italic'): SubsetSource[] {
+  return SUBSET_SOURCES.filter((s) => s.family === family && s.weight === weight && s.style === style);
 }

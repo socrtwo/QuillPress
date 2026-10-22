@@ -128,12 +128,13 @@ function tableCells(env: Env, s: LShape, paras: QPara[] | undefined): TableItem[
   return rows;
 }
 
-function convert(env: Env, s: LShape, parent?: { x: number; y: number }): Item | null {
+function convert(env: Env, s: LShape): Item | null {
   const box = boxOf(env, s);
   if (!box) return null;
-  if (parent) { box.x = r2(box.x - parent.x); box.y = r2(box.y - parent.y); }
   if (s.kind === 'group') {
-    const kids = (s.children || []).map((c) => convert(env, c, { x: box.x + (parent?.x || 0), y: box.y + (parent?.y || 0) })).filter((k): k is Item => !!k);
+    // Group children keep page coordinates (the model's convention: the group only rotates and flips
+    // them about its center).
+    const kids = (s.children || []).map((c) => convert(env, c)).filter((k): k is Item => !!k);
     if (!kids.length) return null;
     const g: GroupItem = { ...common(env, s, box, newId('gr')), kind: 'group', children: kids } as GroupItem;
     delete (g as any).fill; delete (g as any).line;

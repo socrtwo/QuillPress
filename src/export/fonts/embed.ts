@@ -8,8 +8,8 @@
  * Fonts whose license bits forbid embedding (OS/2 fsType "Restricted License") and WOFF2 files, which
  * cannot be converted offline, fall back too, with a warning.
  */
-import { FACES, userFaces, userFontBytes, type UserFont } from '../../fonts';
-import { woffSource } from './sources';
+import { FACES, userFaces, userFontBytes, fontFamilyCss, type UserFont } from '../../fonts';
+import { woffSource, subsetSources } from './sources';
 import { woffToSfnt } from './woff';
 import { TrueTypeFont } from './truetype';
 
@@ -35,6 +35,9 @@ export interface EmbeddedFace {
 
 /** A piece of a text segment: glyphs of the embedded face, or characters the face lacks (for a fallback font). */
 export type TextPiece = { hex: string; width: number; size: number } | { fallback: string; width: number; size: number };
+
+/** A piece of text set in a particular embedded face (the requested one or a supplementary subset), or left for a standard font. */
+export type FacePiece = { face: EmbeddedFace; hex: string; width: number; size: number } | { fallback: string; width: number; size: number };
 
 export interface FontWriter {
   reserve(): number;
@@ -80,6 +83,13 @@ function loadFont(url: string, loader: FontLoader): Promise<TrueTypeFont> {
   return p;
 }
 
+/** The face the screen falls back to for a family that is neither bundled nor the user's (see fontFamilyCss). */
+export function screenFallback(name: string | undefined): string {
+  const css = fontFamilyCss(name || '');
+  for (const m of css.matchAll(/"([^"]+)"/g)) { const fam = bundledFamily(m[1]); if (fam) return fam; }
+  return 'Carlito';
+}
+
 let subsetSeq = 0;
 function subsetTag(): string {
   // Six uppercase letters, unique within a document (and across documents in a session).
@@ -105,8 +115,14 @@ export class PdfFonts {
       if (!p) { p = this.loadUser(mine, bold ? 700 : 400, italic ? 'italic' : 'normal', key); this.faces.set(key, p); }
       return p;
     }
-    const family = bundledFamily(name);
-    if (!family) return Promise.resolve(null);
+    let family = bundledFamily(name);
+    if (!family) {
+      // Not bundled and not the user's: the screen shows the generic fallback face of fontFamilyCss
+      // (Tinos for serif names, Cousine for monospaced, Carlito otherwise); print the same face so
+      // the PDF matches the layout, rather than a standard font with other widths.
+      family = screenFallback(name);
+      if (name && name.trim()) this.warn(`${name.trim()} is not available to the PDF writer; its text is printed in ${family}, the face the screen shows when the font is not installed. Add the font file under Fonts to embed it.`);
+    }
     const key = `${family}|${bold ? 700 : 400}|${italic ? 'italic' : 'normal'}`;
     let p = this.faces.get(key);
     if (!p) {
@@ -203,11 +219,68 @@ export class PdfFonts {
     return out;
   }
 
+  /**
+   * Like encode(), but characters the face lacks are looked up in the extended subsets (Latin
+   * Extended, Cyrillic, Greek) of the matching core family before they are left for a standard font.
+   */
+  async encodeAll(face: EmbeddedFace, text: string, size: number, spc = 0): Promise<FacePiece[]> {
+    const out: FacePiece[] = [];
+    for (const piece of this.encode(face, text, size, spc)) {
+      if ('hex' in piece) { out.push({ face, ...piece }); continue; }
+      const subs = await this.supplements(face);
+      let rest = '';
+      const flushRest = () => { if (rest) { out.push({ fallback: rest, width: spc * [...rest].length, size }); rest = ''; } };
+      for (const ch of piece.fallback) {
+        const cp = ch.codePointAt(0)!;
+        const sub = subs.find((f) => f.font.glyphFor(cp));
+        if (!sub) { rest += ch; continue; }
+        flushRest();
+        const [p] = this.encode(sub, ch, size, spc);
+        const last = out[out.length - 1];
+        if (p && 'hex' in p) {
+          if (last && 'hex' in last && last.face === sub) { last.hex += p.hex; last.width += p.width; } else out.push({ face: sub, ...p });
+        }
+      }
+      flushRest();
+    }
+    return out;
+  }
+
+  private supplementCache = new Map<string, Promise<EmbeddedFace[]>>();
+
+  /** The extended-subset faces of the core family that matches a face (same weight and style). */
+  private supplements(face: EmbeddedFace): Promise<EmbeddedFace[]> {
+    const core = /^(Tinos|Arimo|Cousine|Carlito)$/.test(face.family) ? face.family : SERIF.test(face.family) || (face.user && /serif|roman|garamond|times|book/i.test(face.family) && !/sans/i.test(face.family)) ? 'Tinos' : MONO.test(face.family) || face.font.fixedPitch ? 'Cousine' : 'Arimo';
+    const key = `${core}|${face.weight}|${face.style}`;
+    let p = this.supplementCache.get(key);
+    if (!p) {
+      p = (async () => {
+        const faces: EmbeddedFace[] = [];
+        for (const src of subsetSources(core, face.weight, face.style)) {
+          try {
+            const font = await loadFont(src.url, this.loader);
+            faces.push({ key: `${core}-${src.subset}|${face.weight}|${face.style}`, family: core, weight: face.weight, style: face.style, font, synthBold: false, synthItalic: false, used: new Map(), obj: 0, res: '' });
+          } catch { /* a missing subset only means fewer characters can be embedded */ }
+        }
+        return faces;
+      })();
+      this.supplementCache.set(key, p);
+    }
+    return p;
+  }
+
+  /** Every face that has glyphs to write (requested faces and supplementary subsets). */
+  private async allFaces(): Promise<EmbeddedFace[]> {
+    const out: EmbeddedFace[] = [];
+    for (const p of this.faces.values()) { const f = await p; if (f) out.push(f); }
+    for (const p of this.supplementCache.values()) out.push(...(await p));
+    return out;
+  }
+
   /** Writes the font objects of every used face; returns the warnings collected. */
   async finish(w: FontWriter, deflate: (data: Uint8Array) => Promise<{ data: Uint8Array; filter: string }>): Promise<void> {
-    for (const p of this.faces.values()) {
-      const face = await p;
-      if (!face || !face.obj) continue;
+    for (const face of await this.allFaces()) {
+      if (!face.obj) continue;
       const f = face.font;
       const gids = [...face.used.keys()].sort((a, b) => a - b);
       const scale = 1000 / f.unitsPerEm;

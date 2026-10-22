@@ -20,7 +20,8 @@ describe.skipIf(!have)('Publisher corpus (real files)', () => {
   it('reads a Publisher 2003 newsletter with its pages, pictures, tables and text', async () => {
     const r = await load('923566.pub');
     expect(r.textOnly).toBe(false);
-    expect(r.pub.data.pages).toHaveLength(6);
+    // Four newsletter pages; the special pages listed after the scratch area are not publication pages.
+    expect(r.pub.data.pages).toHaveLength(4);
     expect(r.pub.size).toEqual({ w: 612, h: 792 });
     const all = items(r.pub);
     expect(all.length).toBeGreaterThanOrEqual(70);
@@ -79,7 +80,7 @@ describe.skipIf(!have)('Publisher corpus (real files)', () => {
     expect(storyText(r.pub, frames[0])).toContain('Name:');
     expect(r.warnings.some((w) => /WordArt/.test(w))).toBe(true);
     const s = await load('fdo68259-5.pub');
-    expect(s.pub.data.pages).toHaveLength(9);
+    expect(s.pub.data.pages).toHaveLength(7);
     const wa = items(s.pub).filter((i): i is TextFrame => i.kind === 'text');
     expect(wa.length).toBe(31);
     expect(storyText(s.pub, wa[0])).toBe('Votre texte ici');
@@ -106,7 +107,7 @@ describe.skipIf(!have)('Publisher corpus (real files)', () => {
 
   it('reads a Publisher 2010 regression file with 71 objects and five tables', async () => {
     const r = await load('REG-TST2-pub2010.pub');
-    expect(r.pub.data.pages).toHaveLength(7);
+    expect(r.pub.data.pages.map((p) => p.items.length)).toEqual([9, 10, 8, 44, 0]);
     const tables = items(r.pub).filter((i): i is TableItem => i.kind === 'table');
     expect(tables).toHaveLength(5);
     const t = tables.find((x) => x.rows.length === 4 && x.cols.length === 5)!;
@@ -120,12 +121,12 @@ describe.skipIf(!have)('Publisher corpus (real files)', () => {
   it('reads landscape and A5 publications with masters, groups and embedded pictures', async () => {
     const a = await load('fdo61579-1.pub');
     expect(a.pub.size).toEqual({ w: 841.89, h: 595.28 });
-    expect(a.pub.data.pages).toHaveLength(4);
+    expect(a.pub.data.pages).toHaveLength(2);
     expect(items(a.pub).filter((i) => i.kind === 'group')).toHaveLength(3);
     expect(Object.keys(a.pub.media)).toHaveLength(2);
     const b = await load('fdo67299-1.pub');
     expect(b.pub.size).toEqual({ w: 420.94, h: 595.28 });
-    expect(b.pub.data.pages).toHaveLength(6);
+    expect(b.pub.data.pages).toHaveLength(4);
     expect(b.pub.data.masters).toHaveLength(2);
     expect(Object.keys(b.pub.media)).toHaveLength(8);
   });
@@ -136,7 +137,7 @@ describe.skipIf(!have)('Publisher corpus (real files)', () => {
     expect(d.pub.data.pages.length).toBeGreaterThanOrEqual(1);
     const e = await load('14.0-metadata.pub');
     expect(e.textOnly).toBe(false);
-    expect(e.pub.data.pages).toHaveLength(3);
+    expect(e.pub.data.pages).toHaveLength(1);
     expect(items(e.pub)).toHaveLength(0);
   });
 

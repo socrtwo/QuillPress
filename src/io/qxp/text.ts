@@ -80,7 +80,9 @@ export function runProps(f: CharFormat | undefined): RunProps {
 }
 
 export function paraProps(f: ParaFormat | undefined): ParaProps {
-  const p: ParaProps = {};
+  // QuarkXPress paragraphs default to no space before or after and auto leading (120 % of the
+  // largest size on the line); state that explicitly so the Body style's own spacing does not apply.
+  const p: ParaProps = { spaceBefore: 0, spaceAfter: 0, lineSpacing: 120 };
   if (!f) return p;
   if (f.align !== 'l') p.align = f.align;
   if (f.marL) p.marL = round2(f.marL);

@@ -37,7 +37,8 @@ export interface ParaStyle {
   spaceBefore?: number; spaceAfter?: number; firstIndent?: number; leftIndent?: number; rightIndent?: number;
   /** EMU. */
   tabs?: number[];
-  list?: { bulletChar?: number; numbering?: number; restart?: number };
+  /** `none`: the paragraph explicitly is not a list item (numbering type 0xFF), overriding its style. */
+  list?: { bulletChar?: number; numbering?: number; restart?: number; none?: boolean };
   dropCapLines?: number; dropCapLetters?: number;
 }
 
@@ -147,7 +148,9 @@ export function readParaStyle(r: Reader): ParaStyle {
       case 0x2d: st.dropCapLetters = b.data; break;
     }
   }
-  if (isList) st.list = bulletChar ? { bulletChar } : { numbering, restart };
+  // Numbering type 0xFF switches the list off (Publisher writes it when a list style's bullets are
+  // removed from a paragraph); 0x17 marks a bulleted list whose character is the second sub-block.
+  if (isList) st.list = bulletChar ? { bulletChar } : numbering === 0xff ? { none: true } : { numbering, restart };
   r.seek(offset + len);
   return st;
 }

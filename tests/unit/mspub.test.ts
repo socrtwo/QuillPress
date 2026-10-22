@@ -303,7 +303,7 @@ describe('Publisher 2002+ layout reader', () => {
     expect(b2.line).toBeUndefined();
     const story = pub.data.stories.find((s) => s.id === a.story)!;
     expect(story.paras).toHaveLength(2);
-    expect(story.paras[0]).toMatchObject({ align: 'ctr', spaceAfter: 6, lineSpacing: 150 });
+    expect(story.paras[0]).toMatchObject({ align: 'ctr', spaceAfter: 6, lineSpacing: 180 });
     expect(story.paras[0].runs[0]).toMatchObject({ text: 'Welcome', b: true, size: 24, font: 'Verdana', color: 'Scheme Color 2' });
     expect(story.paras[0].runs[1]).toMatchObject({ text: ' to the newsletter', size: 11, font: 'Georgia' });
     expect(story.paras[0].runs[1].b).toBeUndefined();
@@ -328,9 +328,10 @@ describe('Publisher 2002+ layout reader', () => {
     const group = items.find((i): i is GroupItem => i.kind === 'group')!;
     expect(group).toMatchObject({ x: 432, y: 576, w: 144, h: 144 });
     expect(group.children).toHaveLength(2);
-    expect(group.children[0]).toMatchObject({ kind: 'shape', geom: 'ellipse', x: 0, y: 0, w: 72, h: 72, fill: { type: 'solid', color: 'Scheme Color 2' } });
+    // Group children are in page coordinates.
+    expect(group.children[0]).toMatchObject({ kind: 'shape', geom: 'ellipse', x: 432, y: 576, w: 72, h: 72, fill: { type: 'solid', color: 'Scheme Color 2' } });
     const custom = group.children[1] as ShapeItem;
-    expect(custom).toMatchObject({ kind: 'shape', geom: 'custom', x: 72, y: 72, w: 72, h: 72 });
+    expect(custom).toMatchObject({ kind: 'shape', geom: 'custom', x: 504, y: 648, w: 72, h: 72 });
     expect(custom.path![0].d).toBe('M 0 0 L 21600 0 L 10800 21600 Z');
     const table = items.find((i): i is TableItem => i.kind === 'table')!;
     expect(table.cols).toEqual([108, 108]);
@@ -417,11 +418,12 @@ const SAMPLES = '/home/user/samples/pub';
 const sample = (prefix: string) => `${SAMPLES}/${(existsSync(SAMPLES) ? readdirSync(SAMPLES) : []).find((n) => n.startsWith(prefix)) || ''}`;
 
 describe.skipIf(!existsSync(SAMPLES))('Publisher real files', () => {
-  it('reads the Crawford weekly ad: 3 landscape pages, the menu columns and the table', async () => {
+  it('reads the Crawford weekly ad: one landscape page, the menu columns and the table', async () => {
     const { pub, warnings, textOnly } = await importMsPub(new Uint8Array(readFileSync(sample('2a488d82'))), 'crawford.pub');
     expect(textOnly).toBe(false);
     expect(pub.size).toEqual({ w: 1008, h: 612 });
-    expect(pub.pages).toHaveLength(3);
+    // The two empty pages listed after the scratch area (0x111, 0x115) are Publisher's special pages.
+    expect(pub.pages).toHaveLength(1);
     expect(pub.data.masters).toHaveLength(1);
     const items = pub.pages[0].items;
     expect(items).toHaveLength(10);
@@ -440,12 +442,12 @@ describe.skipIf(!existsSync(SAMPLES))('Publisher real files', () => {
     expect((group.children[1] as PictureFrame).src).toMatch(/image004\.jpg/);
     expect(pub.data.stories).toHaveLength(9);
     expect(pub.data.swatches.find((s) => s.name === 'Scheme Color 2')?.color).toBe('#0000FF');
-    expect(warnings[0]).toMatch(/3 pages and 1 master page with 10 objects and 9 stories/);
+    expect(warnings[0]).toMatch(/1 page and 1 master page with 10 objects and 9 stories/);
   });
 
   it('reads the Park View ad with its pictures, legend and chains intact', async () => {
     const { pub } = await importMsPub(new Uint8Array(readFileSync(sample('49d55a1d'))), 'pv.pub');
-    expect(pub.pages).toHaveLength(3);
+    expect(pub.pages).toHaveLength(1);
     const items = pub.pages[0].items;
     expect(items).toHaveLength(28);
     expect(items.filter((i) => i.kind === 'picture')).toHaveLength(10);

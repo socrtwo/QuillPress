@@ -199,6 +199,15 @@ function effectsAttr(ctx: Ctx, e: Item): string {
 // Items
 
 function transformOf(e: Item): string {
+  // A group's children are in page coordinates (as the editor's group, move and scale operations keep
+  // them): the group only rotates and flips them about its center, it does not translate them.
+  if (e.kind === 'group') {
+    const cx = e.x + e.w / 2, cy = e.y + e.h / 2;
+    const t: string[] = [];
+    if (e.rot) t.push(`rotate(${n(e.rot)} ${n(cx)} ${n(cy)})`);
+    if (e.flipH || e.flipV) t.push(`translate(${n(cx)} ${n(cy)}) scale(${e.flipH ? -1 : 1} ${e.flipV ? -1 : 1}) translate(${n(-cx)} ${n(-cy)})`);
+    return t.join(' ');
+  }
   const t: string[] = [`translate(${n(e.x)} ${n(e.y)})`];
   if (e.rot) t.push(`rotate(${n(e.rot)} ${n(e.w / 2)} ${n(e.h / 2)})`);
   if (e.flipH || e.flipV) t.push(`translate(${e.flipH ? n(e.w) : 0} ${e.flipV ? n(e.h) : 0}) scale(${e.flipH ? -1 : 1} ${e.flipV ? -1 : 1})`);

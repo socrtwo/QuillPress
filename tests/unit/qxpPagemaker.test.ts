@@ -232,7 +232,8 @@ describe('QuarkXPress 4 layout reader', () => {
     expect(pic.media).toBeTruthy();
     expect(pub.media[pic.media!].mime).toBe('image/png');
     expect(pic.wrap?.mode).toBe('square');
-    expect([pic.x, pic.y, pic.w, pic.h]).toEqual([36, 320, 100, 100]);
+    // The 1 pt frame is drawn inside the box: the stroked outline is half a point in on each side.
+    expect([pic.x, pic.y, pic.w, pic.h]).toEqual([36.5, 320.5, 99, 99]);
     expect(line.kind).toBe('line');
     expect(line.line?.width).toBe(2);
     expect(line.line?.head).toBe('triangle');

@@ -222,9 +222,20 @@ export function buildLayout(contents: ContentsInfo, quill: QuillInfo | null, esc
     shapesByPage.get(pg)!.push(ls);
   }
   // Some files list shapes on a page that the drawing layer places inside groups; the group carries them.
+  // The document's page list holds the masters, then the pages in reading order, then Publisher's
+  // special pages (the scratch area 0x10D and, in 2003 and later files, 0x110/0x111/0x113/0x115/0x117;
+  // files converted from older versions end the list with a number that has no page chunk instead).
+  // Only the masters and the pages before that point are part of the publication.
   const ordered: number[] = [];
-  for (const seq of contents.pageOrder) if (contents.pages.has(seq) && !ordered.includes(seq)) ordered.push(seq);
-  for (const seq of contents.pages.keys()) if (!ordered.includes(seq)) ordered.push(seq);
+  let special = false;
+  for (const seq of contents.pageOrder) {
+    const pc = contents.pages.get(seq);
+    if (!pc || pc.dummy) { special = true; continue; }
+    if (ordered.includes(seq)) continue;
+    if (!special || pc.isMaster) ordered.push(seq);
+    else if (shapesByPage.get(seq)?.length) counts.scratch += shapesByPage.get(seq)!.length;
+  }
+  for (const [seq, pc] of contents.pages) if (!ordered.includes(seq) && !pc.dummy && (pc.isMaster || !contents.pageOrder.length)) ordered.push(seq);
   const pageOf = (seq: number): LPage | null => {
     const pc = contents.pages.get(seq);
     if (!pc || pc.dummy) return null;

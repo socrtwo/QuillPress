@@ -41,7 +41,7 @@ interface TextRef { frame: TextFrame | PathTextItem; link: { linkId: number; off
 
 interface Ctx {
   pub: Pub; header: QxpHeader; tables: QxpTables; bytes: Uint8Array; warnings: string[];
-  refs: TextRef[]; counts: Record<string, number>; previews: number; missingPictures: number; customText: number;
+  refs: TextRef[]; counts: Record<string, number>; previews: number; missingPictures: number; customText: number; customPictures: number;
 }
 
 async function readLayout(bytes: Uint8Array, name: string, header: QxpHeader): Promise<LegacyImport> {
@@ -60,7 +60,7 @@ async function readLayout(bytes: Uint8Array, name: string, header: QxpHeader): P
   const facing = docPages.some((p) => p.offsets.length === 2);
   const pub = Pub.blank(size, { facing, pages: 0 });
   pub.data.props.title = name.replace(/\.[^.]+$/, '');
-  const ctx: Ctx = { pub, header, tables, bytes, warnings, refs: [], counts: {}, previews: 0, missingPictures: 0, customText: 0 };
+  const ctx: Ctx = { pub, header, tables, bytes, warnings, refs: [], counts: {}, previews: 0, missingPictures: 0, customText: 0, customPictures: 0 };
   const master = pub.data.masters[0];
 
   for (const qp of docPages) {
@@ -125,12 +125,20 @@ const r2 = (v: number) => Math.round(v * 100) / 100;
 async function toItem(ctx: Ctx, o: QxpObject, off: Rect): Promise<Item | null> {
   const x = r2(o.bbox.left - off.left), y = r2(o.bbox.top - off.top);
   const w = r2(Math.max(0, o.bbox.right - o.bbox.left)), h = r2(Math.max(0, o.bbox.bottom - o.bbox.top));
-  const base = { x, y, w, h, ...(o.rotation ? { rot: r2(-o.rotation) } : {}), ...(o.hflip ? { flipH: true } : {}), ...(o.vflip ? { flipV: true } : {}) };
   const fill = fillOf(o.fill);
   const line = lineOf(o.frame);
+  const isLineShape = o.shape === 'line' || o.shape === 'orthoLine' || o.shape === 'bezierLine';
+  // QuarkXPress draws a box's frame inside its bounds (QuillPress strokes on the outline), so a framed
+  // box is drawn half a frame width smaller and its text inset by the rest of the frame.
+  const half = !isLineShape && o.content !== 'objects' && line?.width ? Math.min(line.width / 2, w / 2, h / 2) : 0;
+  const base = { x: r2(x + half), y: r2(y + half), w: r2(w - 2 * half), h: r2(h - 2 * half), ...(o.rotation ? { rot: r2(-o.rotation) } : {}), ...(o.hflip ? { flipH: true } : {}), ...(o.vflip ? { flipV: true } : {}) };
   const wrap = o.runaround ? { wrap: { mode: 'square' as const, offset: 0 } } : {};
   const count = (k: string) => { ctx.counts[k] = (ctx.counts[k] || 0) + 1; };
   const isLine = o.shape === 'line' || o.shape === 'orthoLine' || o.shape === 'bezierLine';
+  // A straight line runs from the box's first corner (left, top) to its second (right, bottom); the
+  // second can lie left of or above the first, so the box is normalised and the direction kept.
+  const ax = o.bbox.left - off.left, ay = o.bbox.top - off.top, bx = o.bbox.right - off.left, by = o.bbox.bottom - off.top;
+  const lineBox = { x: r2(Math.min(ax, bx)), y: r2(Math.min(ay, by)), w: r2(Math.abs(bx - ax)), h: r2(Math.abs(by - ay)) };
 
   if (o.content === 'objects') {
     count('groups');
@@ -140,7 +148,11 @@ async function toItem(ctx: Ctx, o: QxpObject, off: Rect): Promise<Item | null> {
   if (o.content === 'none') {
     if (isLine && o.shape !== 'bezierLine') {
       count('lines');
-      const l: LineItem = { id: newId('ln'), kind: 'line', name: 'Line', ...base, ...wrap, line: line || { width: 1, fill: { type: 'solid', color: '#000000' } } };
+      const flipH = (bx < ax) !== !!o.hflip, flipV = (by < ay) !== !!o.vflip;
+      const l: LineItem = { id: newId('ln'), kind: 'line', name: 'Line', ...base, ...lineBox, ...wrap, line: line || { width: 1, fill: { type: 'solid', color: '#000000' } } };
+      delete l.flipH; delete l.flipV;
+      if (flipH) l.flipH = true;
+      if (flipV) l.flipV = true;
       return l;
     }
     count(o.shape === 'bezierLine' ? 'lines' : 'shapes');
@@ -162,13 +174,26 @@ async function toItem(ctx: Ctx, o: QxpObject, off: Rect): Promise<Item | null> {
       const file = o.picture?.file?.split(/[\\/:]/).pop();
       p.name = file ? `Picture Box (${file} not in file)` : 'Picture Box (picture not in file)';
     }
+    if (g.geom === 'custom') {
+      // Picture frames have only preset outlines: a polygon or Bézier picture box becomes its outline
+      // (fill and frame) grouped with the picture frame over its rectangle.
+      ctx.customPictures++;
+      delete p.fill; delete p.line; delete p.wrap;
+      const shape: ShapeItem = { id: newId('shp'), kind: 'shape', name: 'Picture Box Outline', ...base, ...g, fill: fill || { type: 'none' }, ...(line ? { line } : {}) };
+      const { rot: _rot, flipH: _fh, flipV: _fv, ...box } = base;
+      const grp: GroupItem = { id: newId('grp'), kind: 'group', name: 'Picture Box', ...box, ...wrap, children: [shape, p] };
+      return grp;
+    }
     return p;
   }
   // text
   if (isLine) {
     count('textPaths');
-    const path = isLine && o.shape !== 'bezierLine' ? { d: `M0 0 L${w} ${h}`, w: w || 1, h: h || 1 } : customPath(o, w, h) || { d: `M0 0 L${w} 0`, w: w || 1, h: 1 };
-    const t: PathTextItem = { id: newId('pt'), kind: 'pathText', name: 'Text Path', ...base, ...wrap, path, text: [{ style: 'Body', runs: [] }], align: 'start', offset: 0, baseline: 0, ...(line ? { line, showPath: true } : {}) };
+    const straight = o.shape !== 'bezierLine';
+    const path = straight
+      ? { d: `M${r2(ax - lineBox.x)} ${r2(ay - lineBox.y)} L${r2(bx - lineBox.x)} ${r2(by - lineBox.y)}`, w: lineBox.w || 1, h: lineBox.h || 1 }
+      : customPath(o, w, h) || { d: `M0 0 L${w} 0`, w: w || 1, h: 1 };
+    const t: PathTextItem = { id: newId('pt'), kind: 'pathText', name: 'Text Path', ...base, ...(straight ? lineBox : {}), ...wrap, path, text: [{ style: 'Body', runs: [] }], align: 'start', offset: 0, baseline: 0, ...(line ? { line, showPath: true } : {}) };
     if (o.link) ctx.refs.push({ frame: t, link: o.link, text: ownText(ctx, o) });
     return t;
   }
@@ -177,14 +202,23 @@ async function toItem(ctx: Ctx, o: QxpObject, off: Rect): Promise<Item | null> {
   const f: TextFrame = {
     id: newId('tf'), kind: 'text', name: 'Text Box', story: '', ...base, ...wrap, ...(fill ? { fill } : {}), ...(line ? { line } : {}),
     columns: ts?.columns && ts.columns > 1 ? ts.columns : undefined, gutter: ts && ts.columns > 1 ? r2(ts.gutter) : undefined,
-    insets: ts ? [r2(ts.insets.top), r2(ts.insets.right), r2(ts.insets.bottom), r2(ts.insets.left)] : [0, 0, 0, 0],
+    insets: ts ? [r2(ts.insets.top + half), r2(ts.insets.right + half), r2(ts.insets.bottom + half), r2(ts.insets.left + half)] : [half, half, half, half],
     anchor: ts && ts.vAlign !== 't' ? ts.vAlign : undefined,
   };
   for (const k of ['columns', 'gutter', 'anchor'] as const) if (f[k] === undefined) delete f[k];
   const g = geomOf(o, w, h);
-  if (g.geom === 'custom') ctx.customText++;
-  else if (g.geom !== 'rect') f.geom = g.geom;
   if (o.link) ctx.refs.push({ frame: f, link: o.link, text: ownText(ctx, o) });
+  if (g.geom === 'custom') {
+    // A text frame has only preset outlines, so a polygon or Bézier text box becomes a group: a shape
+    // carrying the real outline, fill and frame, and the text frame (transparent) over its rectangle.
+    ctx.customText++;
+    delete f.fill; delete f.line; delete f.wrap;
+    const shape: ShapeItem = { id: newId('shp'), kind: 'shape', name: 'Text Box Outline', ...base, ...g, fill: fill || { type: 'none' }, ...(line ? { line } : {}) };
+    const { rot: _rot, flipH: _fh, flipV: _fv, ...box } = base;
+    const grp: GroupItem = { id: newId('grp'), kind: 'group', name: 'Text Box', ...box, ...wrap, children: [shape, f] };
+    return grp;
+  }
+  if (g.geom !== 'rect') f.geom = g.geom;
   return f;
 }
 
@@ -202,31 +236,60 @@ function ownText(ctx: Ctx, o: QxpObject): QxpText | undefined {
 function fillOf(f: string | Gradient | undefined): Fill | undefined {
   if (!f) return undefined;
   if (typeof f === 'string') return { type: 'solid', color: f };
+  // QuarkXPress blends run from the first colour to the second at an angle measured counter-clockwise
+  // (QuillPress angles run clockwise, the y axis pointing down); circular, rectangular and diamond
+  // blends have the second colour at the centre; a mid-linear blend has the second colour in the middle.
   const radial = f.kind === 'circular' || f.kind === 'fullCircular' || f.kind === 'rectangular' || f.kind === 'diamond';
-  return { type: 'gradient', stops: [{ pos: 0, color: f.color1 }, { pos: 1, color: f.color2 }], angle: r2(f.angle), path: radial ? 'radial' : 'linear' };
+  if (radial) return { type: 'gradient', stops: [{ pos: 0, color: f.color2 }, { pos: 1, color: f.color1 }], path: 'radial' };
+  const angle = r2(((-f.angle % 360) + 360) % 360);
+  const stops = f.kind === 'midLinear'
+    ? [{ pos: 0, color: f.color1 }, { pos: 0.5, color: f.color2 }, { pos: 1, color: f.color1 }]
+    : [{ pos: 0, color: f.color1 }, { pos: 1, color: f.color2 }];
+  return { type: 'gradient', stops, angle, path: 'linear' };
 }
 
-function dashOf(s: LineStyle | undefined): Dash {
-  if (!s || s.segments.length < 2) return 'solid';
-  const on = s.proportional ? s.segments[0] * s.patternLength : s.segments[0];
-  if (s.segments.length >= 4) return 'dashDot';
-  if (on <= 1.5 || s.segments[0] <= 0.3) return 'dot';
-  if (on >= 8) return 'longDash';
-  return 'dash';
+/** QuillPress dash presets as (on, off, …) in line widths, as the renderer draws them. */
+const DASH_PRESETS: [Dash, number[]][] = [
+  ['dash', [4, 3]], ['dot', [1, 2]], ['dashDot', [4, 2, 1, 2]], ['longDash', [8, 3]], ['longDashDot', [8, 3, 1, 3]], ['sysDash', [3, 1]], ['sysDot', [1, 1]],
+];
+
+/**
+ * The preset closest to a QuarkXPress dash style. Proportional styles give their segments as fractions
+ * of a pattern whose length is in line widths; the others give the segments in points. Stripes
+ * (parallel lines) have no dash: they are drawn as one solid line, as the reference reader does.
+ */
+function dashOf(s: LineStyle | undefined, width: number): Dash {
+  if (!s || s.stripe || s.segments.length < 2) return 'solid';
+  const w = Math.max(0.1, width);
+  const segs = s.segments.map((v) => Math.max(0, s.proportional ? v * s.patternLength : v / w));
+  // A zero-length dash with round caps draws a dot one line width across.
+  if (s.cap === 'round') segs[0] = Math.max(segs[0], 1);
+  const score = (p: number[]) => {
+    if ((p.length > 2) !== (segs.length > 2)) return Infinity;
+    let d = 0;
+    for (let i = 0; i < Math.min(p.length, segs.length); i++) d += Math.abs(Math.log(Math.max(0.05, segs[i]) / p[i]));
+    return d;
+  };
+  let best: Dash = 'dash', bestScore = Infinity;
+  for (const [name, p] of DASH_PRESETS) { const sc = score(p); if (sc < bestScore) { best = name; bestScore = sc; } }
+  return best;
 }
 
 function lineOf(f: Frame | undefined): Line | undefined {
   if (!f || !(f.width > 0)) return undefined;
   const l: Line = { width: r2(f.width), fill: { type: 'solid', color: f.color } };
-  const d = dashOf(f.dash);
+  const d = dashOf(f.dash, f.width);
   if (d !== 'solid') l.dash = d;
   if (f.dash?.cap === 'round') l.cap = 'round';
   if (f.dash?.join && f.dash.join !== 'miter') l.join = f.dash.join;
+  // Arrow types: 1 arrowhead at the end, 2 at the start, 3 tail feather at the start and arrowhead
+  // at the end, 4 the reverse, 5 arrowheads at both ends. A line starts at its first point (QuillPress
+  // `head`) and ends at its second (`tail`); the feather is drawn as a diamond (no feather end exists).
   switch (f.arrow) {
-    case 1: l.head = 'triangle'; break;
-    case 2: l.tail = 'triangle'; break;
-    case 3: l.head = 'triangle'; l.tail = 'arrow'; break;
-    case 4: l.head = 'arrow'; l.tail = 'triangle'; break;
+    case 1: l.tail = 'triangle'; break;
+    case 2: l.head = 'triangle'; break;
+    case 3: l.head = 'diamond'; l.tail = 'triangle'; break;
+    case 4: l.head = 'triangle'; l.tail = 'diamond'; break;
     case 5: l.head = 'triangle'; l.tail = 'triangle'; break;
   }
   return l;
@@ -259,6 +322,17 @@ function customPath(o: QxpObject, w: number, h: number): { d: string; w: number;
   const parts: string[] = [];
   const closedShape = o.shape === 'bezier';
   for (const c of o.curves) {
+    // Bézier components hold (control in, anchor, control out) triples. A point count that is not a
+    // multiple of three is a plain vertex list (straight edges; closed shapes repeat the first vertex),
+    // as boxes made from polygons store it.
+    if (c.points.length % 3 !== 0) {
+      if (c.points.length < 2) continue;
+      const pts = c.points;
+      const closedList = pts.length > 2 && Math.abs(pts[0].x - pts[pts.length - 1].x) < 0.01 && Math.abs(pts[0].y - pts[pts.length - 1].y) < 0.01;
+      const verts = closedList ? pts.slice(0, -1) : pts;
+      parts.push(verts.map((p, i) => `${i ? 'L' : 'M'}${lx(p)} ${ly(p)}`).join(' ') + (closedShape || closedList ? ' Z' : ''));
+      continue;
+    }
     const n = Math.floor(c.points.length / 3);
     if (n < 2) continue;
     const node = (k: number) => ({ cin: c.points[k * 3], a: c.points[k * 3 + 1], cout: c.points[k * 3 + 2] });
@@ -349,5 +423,6 @@ function summarize(ctx: Ctx, name: string, pageCounts: Record<string, number>): 
   const masters = c.masters ? ` ${c.masters} master page${c.masters === 1 ? '' : 's'} with objects ${c.masters === 1 ? 'was' : 'were'} imported as masters but not applied, because QuarkXPress keeps copies of master items on the pages; apply one from the Pages pane if a page lacks them.` : '';
   ctx.warnings.unshift(`${ctx.header.label} document "${name}": ${pages} page${pages === 1 ? '' : 's'} read with ${parts.length ? parts.join(', ') : 'no objects'}.${masters}`);
   if (ctx.missingPictures) ctx.warnings.push(`${ctx.missingPictures} picture box${ctx.missingPictures === 1 ? ' is' : 'es are'} empty: QuarkXPress links pictures instead of embedding them${ctx.previews ? ` (${ctx.previews} had a usable preview in the file)` : ''}. Place the original picture files again.`);
-  if (ctx.customText) ctx.warnings.push(`${ctx.customText} text box${ctx.customText === 1 ? ' has' : 'es have'} a bezier or polygon outline; QuillPress sets their text in the rectangle.`);
+  if (ctx.customPictures) ctx.warnings.push(`${ctx.customPictures} picture box${ctx.customPictures === 1 ? ' has' : 'es have'} a Bézier or polygon outline: the outline is drawn as a shape grouped with the picture frame, and a placed picture is not clipped to it.`);
+  if (ctx.customText) ctx.warnings.push(`${ctx.customText} text box${ctx.customText === 1 ? ' has' : 'es have'} a Bézier or polygon outline: the outline is drawn as a shape grouped with the text frame, and the text is set in the box's rectangle.`);
 }

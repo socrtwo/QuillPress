@@ -71,7 +71,9 @@ function paraProps(st: ParaStyle, def: ParaStyle): Partial<Paragraph> {
   const ls = st.lineSpacing != null ? st : def.lineSpacing != null ? def : null;
   if (ls && ls.lineSpacing != null) {
     if (ls.lineSpacingPt) { p.lineSpacing = Math.round(ls.lineSpacing * 100) / 100; p.lineSpacingPt = true; }
-    else if (Math.abs(ls.lineSpacing - 1) > 0.001) p.lineSpacing = Math.round(ls.lineSpacing * 1000) / 10;
+    // Publisher's "sp" spacing is a multiple of the single line (about 1.2 em: the model's default of
+    // 120 percent of the font size), not of the font size itself.
+    else if (Math.abs(ls.lineSpacing - 1) > 0.001) p.lineSpacing = Math.round(ls.lineSpacing * 1200) / 10;
   }
   // Publisher paragraphs have no space before or after unless the file says so (the Body style's own
   // spacing must not creep in).
@@ -85,8 +87,9 @@ function paraProps(st: ParaStyle, def: ParaStyle): Partial<Paragraph> {
   const tabs = st.tabs ?? def.tabs;
   if (tabs?.length) p.tabs = tabs.map((t) => ({ pos: emuPt(t), align: 'l' as const }));
   const list = st.list ?? def.list;
-  if (list) {
-    if (list.bulletChar) p.bullet = { kind: 'char', char: String.fromCharCode(list.bulletChar) };
+  if (list && !list.none) {
+    // Bullets are code points of the bullet font (Symbol by default): 0xB7 there is the round bullet.
+    if (list.bulletChar) p.bullet = { kind: 'char', char: list.bulletChar === 0xb7 ? '\u2022' : String.fromCharCode(list.bulletChar) };
     else p.bullet = { kind: 'num', scheme: SCHEMES[list.numbering ?? 0] || 'arabicPeriod', ...(list.restart != null && list.restart > 0 ? { startAt: list.restart } : {}) };
   }
   const dl = st.dropCapLines ?? def.dropCapLines;
