@@ -73,8 +73,9 @@ export function runProps(f: CharFormat | undefined): RunProps {
   if (f.underline || f.wordUnderline) p.u = true;
   if (f.strike) p.strike = true;
   if (f.allCaps) p.caps = 'all'; else if (f.smallCaps) p.caps = 'small';
+  // QuillPress raises or lowers text only as superscript or subscript (set smaller); a QuarkXPress
+  // baseline shift keeps the size, so it is not mapped (the importer counts such runs in a warning).
   if (f.superscript || f.superior) p.baseline = 33; else if (f.subscript) p.baseline = -33;
-  else if (f.baselineShift && f.size > 0) p.baseline = Math.round((f.baselineShift / f.size) * 100);
   if (f.color && f.color !== '#000000') p.color = f.color;
   return p;
 }

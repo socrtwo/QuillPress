@@ -189,4 +189,88 @@ describe.skipIf(!has)('QuarkXPress corpus', () => {
     const wrapped = items(r).filter((i) => (i as ShapeItem).wrap?.mode === 'square');
     expect(wrapped.length).toBeGreaterThan(0);
   });
+
+  // ---------------------------------------------------------------------------------------------
+  // Checked against LibreOffice's rendering of the same files (its import library reads QuarkXPress
+  // from the same public description): the cases below were wrong before that comparison.
+
+  const flatAll = (r: Awaited<ReturnType<typeof load>>, page = 0) => {
+    const flat = (list: GroupItem['children']): GroupItem['children'] => list.flatMap((i) => (i.kind === 'group' ? [i, ...flat(i.children)] : [i]));
+    return flat(items(r, page));
+  };
+
+  it('paragraphs state QuarkXPress spacing so the Body style does not add its own', async () => {
+    const r = await load('3.3_win-textboxes.qxd');
+    for (const s of r.pub.data.stories) for (const p of s.paras) {
+      expect(p.spaceBefore).toBe(0);
+      expect(p.spaceAfter).toBe(0);
+    }
+  });
+
+  it('blends: counter-clockwise angles, second colour at the centre of circular blends', async () => {
+    const r = await load('3.3_win-gradients.qxd');
+    const fills = items(r).map((i) => (i as ShapeItem).fill).filter((f) => f?.type === 'gradient') as Extract<ShapeItem['fill'], { type: 'gradient' }>[];
+    // Box 3 runs from blue at the bottom to yellow at the top (90° counter-clockwise = 270° clockwise).
+    expect(fills.some((f) => f.path === 'linear' && f.angle === 270 && f.stops[0].color === '#0000ff')).toBe(true);
+    const radial = fills.filter((f) => f.path === 'radial');
+    expect(radial.length).toBeGreaterThan(0);
+    // The salmon-and-cyan circular blend has salmon at the centre.
+    expect(radial.some((f) => f.stops[0].color === '#ff6666' && f.stops[1].color === '#02a0c6')).toBe(true);
+  });
+
+  it('lines keep their direction and arrowheads; zero-width lines are hairlines', async () => {
+    const r = await load('3.3_mac-arrows');
+    const lines = items(r).filter((i): i is LineItem => i.kind === 'line');
+    // The thin line rising to the right: its box is normalised and the direction kept by a flip.
+    const rising = lines.find((l) => l.w > 200 && l.h > 100)!;
+    expect(rising).toBeTruthy();
+    expect(rising.flipV).toBe(true);
+    expect(rising.line?.tail).toBe('triangle');
+    const t = await load('4.0_win-text_paths.qxd');
+    const paths = flatAll(t).filter((i): i is PathTextItem => i.kind === 'pathText');
+    expect(paths.some((p) => p.line?.width === 0.25 && p.showPath)).toBe(true);
+    // Text sits on the top of a thick line (baseline alignment, line alignment top): shifted up by half its width.
+    expect(paths.some((p) => p.line && p.line.width! >= 6 && p.baseline === p.line.width! / 2)).toBe(true);
+    // Some paths hang their text below the line (ascent alignment).
+    expect(paths.some((p) => p.baseline < 0)).toBe(true);
+  });
+
+  it('polygon and Bézier boxes keep their outline; vertex lists are read as straight edges', async () => {
+    const p = await load('3.3_win-polygons.qxd');
+    const star = flatAll(p).find((i): i is ShapeItem => i.kind === 'shape' && i.name === 'Picture Box Outline')!;
+    expect(star.geom).toBe('custom');
+    expect(star.path![0].d.split('L').length).toBeGreaterThan(30);
+    const tb = await load('4.0_win-textboxes.qxd');
+    const g = items(tb).find((i): i is GroupItem => i.kind === 'group' && i.name === 'Text Box')!;
+    expect(g.children.map((c) => c.kind)).toEqual(['shape', 'text']);
+    expect((g.children[0] as ShapeItem).path![0].d).toMatch(/C/);
+    const fin = await load('FINCOLOR-4.qxd');
+    const bands = flatAll(fin).filter((i): i is ShapeItem => i.kind === 'shape' && i.name === 'Picture Box Outline');
+    expect(bands.length).toBe(7);
+    expect(bands.every((b) => /^M[^C]*Z$/.test(b.path![0].d))).toBe(true);
+  });
+
+  it('frames are drawn inside the box and the text is inset by them', async () => {
+    const r = await load('q33_obj_0x2046.qxd');
+    const f = items(r).find((i): i is TextFrame => i.kind === 'text' && i.line?.width === 42)!;
+    expect(f).toBeTruthy();
+    expect([f.x, f.y, f.w, f.h]).toEqual([131.25, 186, 223.25, 140.75]);
+    expect(f.insets![0]).toBe(22);
+  });
+
+  it('dash styles map to the nearest preset in line widths; stripes are solid', async () => {
+    const r = await load('4.0_mac-dashes');
+    const lines = items(r).filter((i): i is LineItem => i.kind === 'line');
+    // 7.2 pt on, 4.8 pt off on a 6 pt line is nearest to one width on, one width off.
+    expect(lines.some((l) => l.line?.width === 6 && l.line.dash === 'sysDot')).toBe(true);
+    expect(lines.filter((l) => !l.line?.dash).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('baseline shifts are not turned into subscripts', async () => {
+    const r = await load('char-format1.qxd');
+    const runs = r.pub.data.stories.flatMap((s) => s.paras.flatMap((p) => p.runs)).filter((x) => x.text);
+    expect(runs.map((x) => x.text).join('')).toBe('ab');
+    expect(runs.every((x) => x.baseline === undefined)).toBe(true);
+    expect(r.warnings.some((w) => /baseline shift/.test(w))).toBe(true);
+  });
 });

@@ -7,10 +7,10 @@ import type { Pub } from '../model/pub';
 import type { Item, Page, Master, TextFrame, Paragraph, RunProps, Story } from '../model/types';
 import { DEFAULT_FOOTNOTE_OPTIONS } from '../model/types';
 import { resolvePara, resolveRun } from '../model/styles';
-import { layoutStory, type FlowBox, type LayoutResult, type Rect, type LaidLine, type AnchoredInfo } from './text';
+import { layoutStory, baselineShift, type FlowBox, type LayoutResult, type Rect, type LaidLine, type AnchoredInfo } from './text';
 import { fontFamilyCss } from '../fonts';
 
-export interface FrameLayout { frame: TextFrame; lines: LaidLine[]; boxes: FlowBox[]; overset: boolean; separators: { x: number; y: number; w: number }[] }
+export interface FrameLayout { frame: TextFrame; lines: LaidLine[]; boxes: FlowBox[]; overset: boolean; separators: { x: number; y: number; w: number }[]; rules: LayoutResult['rules'] }
 
 const cache = new WeakMap<Pub, Map<string, { v: number; r: LayoutResult; boxes: FlowBox[] }>>();
 /** Anchor points (on the line) of anchored items, by item id, from the last layout. */
@@ -205,12 +205,12 @@ export function storyLayout(pub: Pub, storyId: string): { r: LayoutResult; boxes
 /** Lines shown by one frame. */
 export function frameLines(pub: Pub, frame: TextFrame): FrameLayout {
   const l = storyLayout(pub, frame.story);
-  if (!l) return { frame, lines: [], boxes: [], overset: false, separators: [] };
+  if (!l) return { frame, lines: [], boxes: [], overset: false, separators: [], rules: [] };
   const idx = new Set(l.boxes.map((b, i) => (b.frame === frame.id ? i : -1)).filter((i) => i >= 0));
   const lines = l.r.lines.filter((ln) => idx.has(ln.box));
   const lastBox = Math.max(...l.boxes.map((b, i) => (b.frame === frame.id ? i : -1)));
   const overset = !!l.r.overset && lastBox === l.boxes.length - 1;
-  return { frame, lines, boxes: l.boxes.filter((b) => b.frame === frame.id), overset, separators: l.r.separators.filter((sp) => idx.has(sp.box)) };
+  return { frame, lines, boxes: l.boxes.filter((b) => b.frame === frame.id), overset, separators: l.r.separators.filter((sp) => idx.has(sp.box)), rules: l.r.rules.filter((ru) => idx.has(ru.box)) };
 }
 
 /** Frames whose story does not fit (overset text), with the number of characters that did not fit. */
@@ -227,6 +227,18 @@ export function oversetFrames(pub: Pub): { frame: TextFrame; chars: number }[] {
     out.push({ frame: last, chars });
   }
   return out;
+}
+
+/**
+ * Height the renderer and the PDF writer clip a text frame to: the stored height, or for a frame that
+ * grows with its text (autosize 'height', laid out unbounded) the height its laid lines reach.
+ */
+export function frameClipHeight(f: TextFrame, lines: LaidLine[]): number {
+  if (f.autosize !== 'height') return f.h;
+  const ins = f.insets || [4, 4, 4, 4];
+  let bottom = f.y + f.h - ins[3];
+  for (const l of lines) bottom = Math.max(bottom, l.y + Math.max(0, l.height - l.ascent) + Math.max(0, ...l.segs.map((sg) => -baselineShift(sg.style.baseline, sg.size))));
+  return Math.max(f.h, bottom - f.y + ins[3]);
 }
 
 /** Height the text of a single-column frame needs (for autosize). */

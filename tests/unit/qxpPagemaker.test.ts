@@ -236,7 +236,9 @@ describe('QuarkXPress 4 layout reader', () => {
     expect([pic.x, pic.y, pic.w, pic.h]).toEqual([36.5, 320.5, 99, 99]);
     expect(line.kind).toBe('line');
     expect(line.line?.width).toBe(2);
-    expect(line.line?.head).toBe('triangle');
+    // Arrow type 1 is an arrowhead at the line's end (its second point).
+    expect(line.line?.tail).toBe('triangle');
+    expect(line.line?.head).toBeUndefined();
     expect([line.x, line.y, line.w, line.h]).toEqual([36, 500, 364, 0]);
     expect(oval.kind).toBe('shape');
     expect(oval.geom).toBe('ellipse');

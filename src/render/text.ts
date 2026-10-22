@@ -128,6 +128,12 @@ export interface LayoutResult {
   used: number;
   /** Footnote separator rules (page coordinates). */
   separators: { box: number; x: number; y: number; w: number }[];
+  /**
+   * Paragraph rules (ParaProps ruleAbove/ruleBelow), page coordinates: y is the rule's center line,
+   * x/w span the column between the paragraph's margins. A rule above sits `offset` points above the
+   * top of the paragraph's first line; a rule below `offset` points below the descent of its last line.
+   */
+  rules: { box: number; x: number; y: number; w: number; width: number; color: string }[];
   /** The label given to each footnote referenced. */
   footnoteLabels?: Record<string, string>;
   /** Footnotes numbered so far (footnoteStart plus the references laid). */
@@ -168,7 +174,8 @@ export interface LayoutOptions {
   opticalMarginSize?: number;
 }
 
-export const cssFont = (st: RunProps, size: number, family: string) => `${st.i ? 'italic ' : ''}${st.b ? 'bold ' : ''}${Math.max(0.5, size)}px "${family}"`;
+// small-caps is measured as drawn: the browser (screen) and the PDF writer set lowercase as capitals at 70%.
+export const cssFont = (st: RunProps, size: number, family: string) => `${st.i ? 'italic ' : ''}${st.caps === 'small' ? 'small-caps ' : ''}${st.b ? 'bold ' : ''}${Math.max(0.5, size)}px "${family}"`;
 
 export function bulletText(b: Bullet | undefined, index: number): string {
   if (!b || b.kind === 'none') return '';
@@ -294,6 +301,18 @@ export function hangAmount(ch: string, side: 'left' | 'right', w: number, size: 
  * column holding the reference; the column's bottom is reserved for it, so the reference and its
  * note always share a column. Footnote lines carry `footnote: true`.
  */
+/** Superscript and subscript runs are set at this fraction of their size. */
+export const SHIFTED_SIZE = 0.67;
+
+/**
+ * Raise (positive) or drop (negative) of a superscript/subscript segment, in points: RunProps.baseline
+ * is a percent of the run's own font size, and a shifted segment's size is already scaled by
+ * SHIFTED_SIZE. The screen (SVG baseline-shift) and the PDF writer both use this.
+ */
+export function baselineShift(pct: number | undefined, segSize: number): number {
+  return pct ? (pct / 100) * (segSize / SHIFTED_SIZE) : 0;
+}
+
 export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult {
   const m = o.measure || measure;
   const fontOf = o.font || ((f) => f || 'Tinos');
@@ -366,7 +385,7 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
     let off = 0;
     p.runs.forEach((r, ri) => {
       const s = o.resolveRun(baseRun, r);
-      const size = (s.size ?? 10.5) * (s.baseline ? 0.67 : 1);
+      const size = (s.size ?? 10.5) * (s.baseline ? SHIFTED_SIZE : 1);
       const fam = fontOf(s.font);
       const css = cssFont(s, size, fam);
       if (r.br) { toks.push({ text: '', style: s, size, font: fam, css, run: ri, off, br: true, space: false, w: 0 }); off += 1; return; }
@@ -391,7 +410,7 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
         if (!part) continue;
         const tab = part === '\t';
         const space = !tab && /^\s+$/.test(part);
-        const w = tab ? 0 : m(part, css) + (s.spc ? s.spc * part.length : 0) + (s.caps === 'small' ? 0 : 0);
+        const w = tab ? 0 : m(part, css) + (s.spc ? s.spc * part.length : 0);
         toks.push({ text: part, style: s, size, font: fam, css, run: ri, off: pos, tab, space, w });
         pos += part.length;
       }
@@ -685,7 +704,23 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
     else if (o.anchor === 'just' && body.length > 1) { const gap = extra / (body.length - 1); body.forEach((l, i) => { l.y += gap * i; }); }
     for (const l of lines) if (l.anchors) for (const a of l.anchors) { const d = l.y - a.ay; a.y += d; a.ay = l.y; }
   }
-  return { lines, overset, perBox, used, separators, footnoteLabels, footnoteCount: fnCount };
+  // Paragraph rules, from the final line positions.
+  const rules: LayoutResult['rules'] = [];
+  const propsOf = new Map<number, ParaProps>();
+  for (const l of lines) {
+    if (l.footnote || (!l.first && !l.last)) continue;
+    const p = paras[l.para];
+    const b = o.boxes[l.box];
+    if (!p || !b) continue;
+    let st = propsOf.get(l.para);
+    if (!st) { st = o.resolve(p).props; propsOf.set(l.para, st); }
+    if (!st.ruleAbove && !st.ruleBelow) continue;
+    const x = b.x + (st.marL ?? 0), w = Math.max(0, b.w - (st.marL ?? 0) - (st.marR ?? 0));
+    const ra = st.ruleAbove, rb = st.ruleBelow;
+    if (l.first && ra && ra.width > 0) rules.push({ box: l.box, x, w, y: l.y - l.ascent - (ra.offset ?? 0) - ra.width / 2, width: ra.width, color: ra.color });
+    if (l.last && rb && rb.width > 0) rules.push({ box: l.box, x, w, y: l.y + l.ascent * 0.3 + (rb.offset ?? 0) + rb.width / 2, width: rb.width, color: rb.color });
+  }
+  return { lines, overset, perBox, used, separators, rules, footnoteLabels, footnoteCount: fnCount };
 }
 
 /** Plain-text words count. */

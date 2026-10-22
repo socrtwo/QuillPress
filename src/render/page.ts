@@ -7,8 +7,8 @@ import type { Fill, Item, Line, Master, Page, PictureFrame, ShapeItem, TableItem
 import { DEFAULT_FOOTNOTE_OPTIONS } from '../model/types';
 import { colorHex, resolvePara, resolveRun } from '../model/styles';
 import { geometryPath, scalePath } from '../model/geometry';
-import { frameBoxes, frameLines, layoutOptions, storyOptions, cssFamily, syncAnchors, anchorPointOf } from './flow';
-import { layoutStory, type LaidLine, type FlowBox, cssFont } from './text';
+import { frameBoxes, frameLines, frameClipHeight, layoutOptions, storyOptions, cssFamily, syncAnchors, anchorPointOf } from './flow';
+import { layoutStory, baselineShift, type LaidLine, type FlowBox, cssFont } from './text';
 import { pathTextLayout, pathTextNotes } from './pathText';
 import { tableLayout } from './table';
 import { escHtml } from '../util/sanitize';
@@ -259,22 +259,26 @@ function textFrameSvg(ctx: Ctx, f: TextFrame, owner: Owner, fromMaster: boolean)
   let lines: LaidLine[];
   let overset = false;
   let separators: { x: number; y: number; w: number }[] = [];
+  let rules: { x: number; y: number; w: number; width: number; color: string }[] = [];
   if (fromMaster && ctx.onPage) {
     const story = pub.story(f.story);
     const boxes = frameBoxes(f, owner, ctx.pageIndex, pub);
-    const r = story ? layoutStory(story.paras, storyOptions(pub, story, boxes, { anchor: (f.columns || 1) === 1 ? f.anchor : undefined })) : { lines: [], overset: undefined, separators: [] };
-    lines = r.lines; overset = !!r.overset; separators = r.separators;
+    const r = story ? layoutStory(story.paras, storyOptions(pub, story, boxes, { anchor: (f.columns || 1) === 1 ? f.anchor : undefined })) : { lines: [], overset: undefined, separators: [], rules: [] };
+    lines = r.lines; overset = !!r.overset; separators = r.separators; rules = r.rules;
   } else {
     const fl = frameLines(pub, f);
-    lines = fl.lines; overset = fl.overset; separators = fl.separators;
+    lines = fl.lines; overset = fl.overset; separators = fl.separators; rules = fl.rules;
   }
   const clipId = `${ctx.prefix}c${ctx.defs.length}`;
-  ctx.defs.push(`<clipPath id="${clipId}"><path d="${d}"/></clipPath>`);
+  // A frame that grows with its text is clipped to the height its lines reach, not its stored height.
+  const clipH = frameClipHeight(f, lines);
+  ctx.defs.push(`<clipPath id="${clipId}"><path d="${clipH > f.h ? `M0 0 H${n(f.w)} V${n(clipH)} H0 Z` : d}"/></clipPath>`);
+  const ruleSvg = rules.map((ru) => `<path d="M${n(ru.x)} ${n(ru.y)} H${n(ru.x + ru.w)}" stroke="${colorHex(pub.data, ru.color)}" stroke-width="${n(ru.width)}" class="qp-para-rule"/>`).join('');
   const sepW = (pub.data.footnoteOptions || DEFAULT_FOOTNOTE_OPTIONS).separator.width;
   const seps = separators.filter((sp) => sp.w > 0 && sepW > 0).map((sp) => `<path d="M${n(sp.x)} ${n(sp.y)} H${n(sp.x + sp.w)}" stroke="${colorHex(pub.data, 'Black')}" stroke-width="${n(sepW)}" class="qp-fn-sep"/>`).join('');
   // The clip is defined in the frame's own box, so it goes on a group WITHOUT the translation that maps the
   // lines (page coordinates) into it; a clip on the translated group would be read in page coordinates.
-  out += `<g clip-path="url(#${clipId})"><g transform="translate(${n(-f.x)} ${n(-f.y)})">${linesSvg(ctx, lines)}${seps}</g></g>`;
+  out += `<g clip-path="url(#${clipId})"><g transform="translate(${n(-f.x)} ${n(-f.y)})">${ruleSvg}${linesSvg(ctx, lines)}${seps}</g></g>`;
   if (ctx.opts.mode === 'edit') {
     if (ctx.opts.frameEdges !== false) out += `<path d="${d}" fill="none" stroke="#9aa0a6" stroke-width="0.5" stroke-dasharray="2 2" vector-effect="non-scaling-stroke" class="qp-frame-edge"/>`;
     if (overset) out += `<g class="qp-overset" transform="translate(${n(f.w - 10)} ${n(f.h - 10)})"><rect width="9" height="9" fill="#fff" stroke="#d32f2f" stroke-width="0.8"/><path d="M4.5 2 V7 M2 4.5 H7" stroke="#d32f2f" stroke-width="1.2"/></g>`;
@@ -297,7 +301,7 @@ export function linesSvg(ctx: Ctx, lines: LaidLine[]): string {
       const st = s.style;
       const color = colorHex(d, st.color);
       const deco = [st.u ? 'underline' : '', st.strike ? 'line-through' : ''].filter(Boolean).join(' ');
-      const baseline = st.baseline ? ` baseline-shift="${st.baseline > 0 ? 'super' : 'sub'}"` : '';
+      const baseline = st.baseline ? ` baseline-shift="${n(baselineShift(st.baseline, s.size))}"` : '';
       let style = `font-family:${escHtml(cssFamily(s.font))};font-size:${n(s.size)}px;${st.b ? 'font-weight:bold;' : ''}${st.i ? 'font-style:italic;' : ''}${deco ? `text-decoration:${deco};` : ''}${st.caps === 'small' ? 'font-variant:small-caps;' : ''}${st.spc ? `letter-spacing:${n(st.spc)}px;` : ''}${st.liga === false ? 'font-variant-ligatures:none;' : ''}${st.kern === false ? 'font-kerning:none;' : ''}`;
       if (st.highlight) { const hx = colorHex(d, st.highlight); parts.push(`<rect x="${n(l.x + s.x)}" y="${n(l.y - l.ascent)}" width="${n(s.w)}" height="${n(l.ascent * 1.25)}" fill="${hx}"/>`); }
       if (s.drop) {

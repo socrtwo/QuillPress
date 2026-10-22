@@ -18,12 +18,12 @@ import type { Pub } from '../model/pub';
 import type { Item, Page, Line, TextFrame, Master, PathTextItem } from '../model/types';
 import { colorHex } from '../model/styles';
 import { geometryPath } from '../model/geometry';
-import { frameBoxes, frameLines, layoutOptions, syncAnchors } from '../render/flow';
+import { frameBoxes, frameLines, frameClipHeight, layoutOptions, syncAnchors } from '../render/flow';
 import { pathTextLayout, pathPolyline, localToPage, pathTextNotes } from '../render/pathText';
 import { tableLayout } from '../render/table';
 import { defaultShapeFillLine } from '../render/page';
 import { DEFAULT_FOOTNOTE_OPTIONS } from '../model/types';
-import { layoutStory, type LaidLine, type FlowBox } from '../render/text';
+import { layoutStory, baselineShift, type LaidLine, type FlowBox } from '../render/text';
 import { PdfFonts, type EmbeddedFace, type FontLoader } from './fonts/embed';
 import { imageObj, deflate, pictureFilter, type ImageEntry } from './pdfImages';
 import { pathOps, rgb, n, fillPath, fillColor, lineEndsOps, shadowOps, type PaintCtx, type PathEnds } from './pdfPaint';
@@ -230,12 +230,13 @@ function embeddedKey(ctx: Ctx, face: EmbeddedFace): string {
   return face.res;
 }
 
-/** Small capitals: lowercase letters become capitals at 80% of the size. */
+/** Small capitals: lowercase letters become capitals at 70% of the size. */
 function smallCapsChunks(text: string, size: number): { text: string; size: number }[] {
   const out: { text: string; size: number }[] = [];
   for (const ch of text) {
     const lower = ch !== ch.toUpperCase() && ch === ch.toLowerCase();
-    const sz = lower ? size * 0.8 : size;
+    // Browsers synthesize small capitals at 70% of the size; the layout measured them that way.
+    const sz = lower ? size * 0.7 : size;
     const t = lower ? ch.toUpperCase() : ch;
     const last = out[out.length - 1];
     if (last && last.size === sz) last.text += t; else out.push({ text: t, size: sz });
@@ -296,7 +297,7 @@ async function linesOps(ctx: Ctx, lines: LaidLine[]): Promise<string> {
       const color = rgb(colorHex(d, st.color));
       let y = l.y;
       if (s.drop) y = l.y + (s.drop - 1) * l.height;
-      if (st.baseline) y -= (st.baseline / 100) * s.size * 0.6;
+      y -= baselineShift(st.baseline, s.size);
       out.push(await textOps(ctx, s.text, s.font, st.b, st.i, s.size, l.x + s.x, y, color, st.spc || 0, st.caps));
       if (st.u || st.strike) {
         const [r, g, b] = color;
@@ -425,10 +426,14 @@ async function itemOps(ctx: Ctx, e: Item, owner: Page | Master, fromMaster: bool
       out.push('Q');
       let lines: LaidLine[];
       let separators: { x: number; y: number; w: number }[] = [];
-      if (fromMaster) { const story = pub.story(e.story); const boxes: FlowBox[] = frameBoxes(e, owner, ctx.pageIndex, pub); lines = story ? layoutStory(story.paras, layoutOptions(pub, boxes, { anchor: (e.columns || 1) === 1 ? e.anchor : undefined })).lines : []; }
-      else { const fl = frameLines(pub, e); lines = fl.lines; separators = fl.separators; }
-      // Clip to the frame; the lines are in the same coordinates as the frame's position.
-      out.push(`q ${at}\n${path}\nW n 1 0 0 1 ${n(-e.x)} ${n(-e.y)} cm`);
+      let rules: { x: number; y: number; w: number; width: number; color: string }[] = [];
+      if (fromMaster) { const story = pub.story(e.story); const boxes: FlowBox[] = frameBoxes(e, owner, ctx.pageIndex, pub); const r = story ? layoutStory(story.paras, layoutOptions(pub, boxes, { anchor: (e.columns || 1) === 1 ? e.anchor : undefined })) : null; lines = r ? r.lines : []; rules = r ? r.rules : []; }
+      else { const fl = frameLines(pub, e); lines = fl.lines; separators = fl.separators; rules = fl.rules; }
+      // Clip to the frame (a frame that grows with its text: to the height its lines reach); the lines
+      // are in the same coordinates as the frame's position.
+      const clipH = frameClipHeight(e, lines);
+      out.push(`q ${at}\n${clipH > e.h ? `0 0 ${n(e.w)} ${n(clipH)} re` : path}\nW n 1 0 0 1 ${n(-e.x)} ${n(-e.y)} cm`);
+      for (const ru of rules) { const hx = colorHex(pub.data, ru.color); if (hx === 'none') continue; const [rr, rg, rb] = rgb(hx); out.push(`q ${n(rr)} ${n(rg)} ${n(rb)} RG ${n(ru.width)} w [] 0 d 0 J ${n(ru.x)} ${n(ru.y)} m ${n(ru.x + ru.w)} ${n(ru.y)} l S Q`); }
       out.push(await linesOps(ctx, lines));
       // Footnote separators: a rule above the notes at the bottom of a column.
       const sepW = pub.data.footnoteOptions?.separator.width ?? 0.5;

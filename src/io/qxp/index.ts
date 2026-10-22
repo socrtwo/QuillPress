@@ -37,11 +37,15 @@ export async function importQxp(data: Uint8Array, name: string): Promise<LegacyI
   }
 }
 
-interface TextRef { frame: TextFrame | PathTextItem; link: { linkId: number; offsetIntoText: number; contentIndex: number }; text?: QxpText }
+interface TextRef {
+  frame: TextFrame | PathTextItem; link: { linkId: number; offsetIntoText: number; contentIndex: number }; text?: QxpText;
+  /** Text paths: which part of the text (0 ascent, 1 centre, 2 baseline, 3 descent) sits on which part of the line (0 top, 1 centre, 2 bottom). */
+  pathAlign?: { text: number; line: number; width: number };
+}
 
 interface Ctx {
   pub: Pub; header: QxpHeader; tables: QxpTables; bytes: Uint8Array; warnings: string[];
-  refs: TextRef[]; counts: Record<string, number>; previews: number; missingPictures: number; customText: number; customPictures: number;
+  refs: TextRef[]; counts: Record<string, number>; previews: number; missingPictures: number; customText: number; customPictures: number; shiftedRuns: number;
 }
 
 async function readLayout(bytes: Uint8Array, name: string, header: QxpHeader): Promise<LegacyImport> {
@@ -60,7 +64,7 @@ async function readLayout(bytes: Uint8Array, name: string, header: QxpHeader): P
   const facing = docPages.some((p) => p.offsets.length === 2);
   const pub = Pub.blank(size, { facing, pages: 0 });
   pub.data.props.title = name.replace(/\.[^.]+$/, '');
-  const ctx: Ctx = { pub, header, tables, bytes, warnings, refs: [], counts: {}, previews: 0, missingPictures: 0, customText: 0, customPictures: 0 };
+  const ctx: Ctx = { pub, header, tables, bytes, warnings, refs: [], counts: {}, previews: 0, missingPictures: 0, customText: 0, customPictures: 0, shiftedRuns: 0 };
   const master = pub.data.masters[0];
 
   for (const qp of docPages) {
@@ -126,8 +130,8 @@ async function toItem(ctx: Ctx, o: QxpObject, off: Rect): Promise<Item | null> {
   const x = r2(o.bbox.left - off.left), y = r2(o.bbox.top - off.top);
   const w = r2(Math.max(0, o.bbox.right - o.bbox.left)), h = r2(Math.max(0, o.bbox.bottom - o.bbox.top));
   const fill = fillOf(o.fill);
-  const line = lineOf(o.frame);
   const isLineShape = o.shape === 'line' || o.shape === 'orthoLine' || o.shape === 'bezierLine';
+  const line = lineOf(o.frame, isLineShape);
   // QuarkXPress draws a box's frame inside its bounds (QuillPress strokes on the outline), so a framed
   // box is drawn half a frame width smaller and its text inset by the rest of the frame.
   const half = !isLineShape && o.content !== 'objects' && line?.width ? Math.min(line.width / 2, w / 2, h / 2) : 0;
@@ -194,7 +198,7 @@ async function toItem(ctx: Ctx, o: QxpObject, off: Rect): Promise<Item | null> {
       ? { d: `M${r2(ax - lineBox.x)} ${r2(ay - lineBox.y)} L${r2(bx - lineBox.x)} ${r2(by - lineBox.y)}`, w: lineBox.w || 1, h: lineBox.h || 1 }
       : customPath(o, w, h) || { d: `M0 0 L${w} 0`, w: w || 1, h: 1 };
     const t: PathTextItem = { id: newId('pt'), kind: 'pathText', name: 'Text Path', ...base, ...(straight ? lineBox : {}), ...wrap, path, text: [{ style: 'Body', runs: [] }], align: 'start', offset: 0, baseline: 0, ...(line ? { line, showPath: true } : {}) };
-    if (o.link) ctx.refs.push({ frame: t, link: o.link, text: ownText(ctx, o) });
+    if (o.link) ctx.refs.push({ frame: t, link: o.link, text: ownText(ctx, o), pathAlign: { text: o.textPath?.alignment ?? 2, line: o.textPath?.lineAlignment ?? 0, width: line?.width ?? 0 } });
     return t;
   }
   count('textBoxes');
@@ -227,7 +231,11 @@ function ownText(ctx: Ctx, o: QxpObject): QxpText | undefined {
   const l = o.link!;
   // Blocks 1–3 hold the header and the document chain, so an index below 4 never names a story.
   if (l.contentIndex < 4 || l.offsetIntoText !== 0) return undefined;
-  try { return readStory(ctx.bytes, l.contentIndex, ctx.header, ctx.tables); } catch (e) {
+  try {
+    const t = readStory(ctx.bytes, l.contentIndex, ctx.header, ctx.tables);
+    ctx.shiftedRuns += t.chars.filter((c) => c.format && c.format.baselineShift && !c.format.superscript && !c.format.subscript && !c.format.superior && !c.format.control).length;
+    return t;
+  } catch (e) {
     ctx.warnings.push(`The text of a box could not be read (${(e as Error).message}).`);
     return undefined;
   }
@@ -275,9 +283,12 @@ function dashOf(s: LineStyle | undefined, width: number): Dash {
   return best;
 }
 
-function lineOf(f: Frame | undefined): Line | undefined {
-  if (!f || !(f.width > 0)) return undefined;
-  const l: Line = { width: r2(f.width), fill: { type: 'solid', color: f.color } };
+/** QuarkXPress draws a line of width 0 as a hairline (the thinnest the device prints); boxes have no frame then. */
+const HAIRLINE = 0.25;
+
+function lineOf(f: Frame | undefined, hairline = false): Line | undefined {
+  if (!f || !(f.width > 0 || (hairline && f.width === 0 && f.color))) return undefined;
+  const l: Line = { width: f.width > 0 ? r2(f.width) : HAIRLINE, fill: { type: 'solid', color: f.color } };
   const d = dashOf(f.dash, f.width);
   if (d !== 'solid') l.dash = d;
   if (f.dash?.cap === 'round') l.cap = 'round';
@@ -390,6 +401,7 @@ function resolveStories(ctx: Ctx): void {
       });
     }
     for (const p of paths) if (!p.frame.text?.length || !ranges.length) p.frame.text = empty();
+    for (const p of paths) alignPathText(p.frame, p.pathAlign);
     if (frames.length) {
       const story = pub.newStory(owner?.text ? storyParagraphs(ranges.length ? textWithout(owner.text, ranges) : owner.text) : empty());
       frames.forEach((r, i) => {
@@ -402,6 +414,21 @@ function resolveStories(ctx: Ctx): void {
   };
   for (const s of singles) assign([s]);
   for (const g of groups.values()) assign(g);
+}
+
+/**
+ * The perpendicular shift (points, positive = above the path) that puts the chosen part of the text on
+ * the chosen part of the line's stroke. Ascent and descent are taken as 0.8 and 0.2 of the largest size.
+ */
+function alignPathText(t: PathTextItem, a: TextRef['pathAlign']): void {
+  if (!a) return;
+  let size = 0;
+  for (const para of t.text) for (const run of para.runs) if (run.text) size = Math.max(size, run.size ?? 12);
+  if (!size) return;
+  const lineOff = a.line === 0 ? a.width / 2 : a.line === 2 ? -a.width / 2 : 0;
+  const textOff = a.text === 0 ? -0.8 * size : a.text === 1 ? -0.3 * size : a.text === 3 ? 0.2 * size : 0;
+  const shift = r2(lineOff + textOff);
+  if (shift) t.baseline = shift;
 }
 
 function addSwatches(ctx: Ctx): void {
@@ -423,6 +450,7 @@ function summarize(ctx: Ctx, name: string, pageCounts: Record<string, number>): 
   const masters = c.masters ? ` ${c.masters} master page${c.masters === 1 ? '' : 's'} with objects ${c.masters === 1 ? 'was' : 'were'} imported as masters but not applied, because QuarkXPress keeps copies of master items on the pages; apply one from the Pages pane if a page lacks them.` : '';
   ctx.warnings.unshift(`${ctx.header.label} document "${name}": ${pages} page${pages === 1 ? '' : 's'} read with ${parts.length ? parts.join(', ') : 'no objects'}.${masters}`);
   if (ctx.missingPictures) ctx.warnings.push(`${ctx.missingPictures} picture box${ctx.missingPictures === 1 ? ' is' : 'es are'} empty: QuarkXPress links pictures instead of embedding them${ctx.previews ? ` (${ctx.previews} had a usable preview in the file)` : ''}. Place the original picture files again.`);
+  if (ctx.shiftedRuns) ctx.warnings.push(`${ctx.shiftedRuns} text run${ctx.shiftedRuns === 1 ? ' has' : 's have'} a baseline shift, which was not kept (QuillPress raises or lowers text only as superscript or subscript).`);
   if (ctx.customPictures) ctx.warnings.push(`${ctx.customPictures} picture box${ctx.customPictures === 1 ? ' has' : 'es have'} a Bézier or polygon outline: the outline is drawn as a shape grouped with the picture frame, and a placed picture is not clipped to it.`);
   if (ctx.customText) ctx.warnings.push(`${ctx.customText} text box${ctx.customText === 1 ? ' has' : 'es have'} a Bézier or polygon outline: the outline is drawn as a shape grouped with the text frame, and the text is set in the box's rectangle.`);
 }
