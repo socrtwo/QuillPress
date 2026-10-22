@@ -46,7 +46,8 @@
 - [x] Publisher (2002–2016 fully; 2000 and 97/98 in part), QuarkXPress 3.1–4.1 and PageMaker 6–7 layout readers written from the Document Liberation Project's format descriptions; other versions and INDD files open with their text and pictures.
 - [x] Verification of the binary readers against files saved by Publisher, QuarkXPress and PageMaker (three Publisher 2007 files and the Document Liberation Project's seed corpora).
 - [x] Publisher 2000 cell borders; PageMaker skew, master pages and type styles; QuarkXPress outline/shadow type, horizontal scale and baseline shift; WMF/EMF pictures as vector drawings; outline/shadow type, horizontal scale, baseline shift and skew in the model, on screen, in PDF and IDML; blurred shadows and glow in PDF.
-- [ ] PDF placement; EPUB and PDF/X export; data merge; PageMaker custom tab stops (no sample); soft edges in PDF.
+- [x] Soft edges in PDF export (feathered soft mask, identical to the screen).
+- [ ] PDF placement; EPUB and PDF/X export; data merge; PageMaker custom tab stops (needs a sample file that has them); object effects in IDML (drop shadow, glow, basic feather).
 
 ## M6 — Collaboration and suite
 

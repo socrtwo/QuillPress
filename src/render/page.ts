@@ -188,9 +188,14 @@ function effectsAttr(ctx: Ctx, e: Item): string {
   const id = `${ctx.prefix}f${ctx.defs.length}`;
   const d = ctx.pub.data;
   const parts: string[] = [];
-  if (ef.shadow) { const a = (ef.shadow.dir * Math.PI) / 180; parts.push(`<feDropShadow dx="${n(Math.cos(a) * ef.shadow.dist)}" dy="${n(Math.sin(a) * ef.shadow.dist)}" stdDeviation="${n(ef.shadow.blur / 2)}" flood-color="${colorHex(d, ef.shadow.color)}" flood-opacity="${ef.shadow.alpha ?? 0.5}"/>`); }
-  if (ef.glow) parts.push(`<feMorphology operator="dilate" radius="${n(ef.glow.rad / 2)}" in="SourceAlpha" result="dl"/><feGaussianBlur in="dl" stdDeviation="${n(ef.glow.rad / 2)}" result="bl"/><feFlood flood-color="${colorHex(d, ef.glow.color)}" flood-opacity="0.7"/><feComposite in2="bl" operator="in"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>`);
-  if (ef.softEdge) parts.push(`<feGaussianBlur stdDeviation="${n(ef.softEdge / 2)}"/>`);
+  // Each step names its result so they chain: soft edge (the object itself fades: its alpha is blurred
+  // by radius / 2.25 and remapped to 2a − 1, 0 at the outline and about 1 a radius inside, round for any
+  // shape; the contents stay sharp; the PDF writer draws the same mask), then the glow behind it, then
+  // the drop shadow under both.
+  let cur = 'SourceGraphic';
+  if (ef.softEdge) { parts.push(`<feGaussianBlur in="SourceAlpha" stdDeviation="${n(ef.softEdge / 2.25)}" result="sb"/><feComponentTransfer in="sb" result="sf"><feFuncA type="linear" slope="2" intercept="-1"/></feComponentTransfer><feComposite in="SourceGraphic" in2="sf" operator="in" result="soft"/>`); cur = 'soft'; }
+  if (ef.glow) { parts.push(`<feMorphology operator="dilate" radius="${n(ef.glow.rad / 2)}" in="SourceAlpha" result="dl"/><feGaussianBlur in="dl" stdDeviation="${n(ef.glow.rad / 2)}" result="bl"/><feFlood flood-color="${colorHex(d, ef.glow.color)}" flood-opacity="0.7"/><feComposite in2="bl" operator="in" result="gl"/><feMerge result="glowed"><feMergeNode in="gl"/><feMergeNode in="${cur}"/></feMerge>`); cur = 'glowed'; }
+  if (ef.shadow) { const a = (ef.shadow.dir * Math.PI) / 180; parts.push(`<feDropShadow in="${cur}" dx="${n(Math.cos(a) * ef.shadow.dist)}" dy="${n(Math.sin(a) * ef.shadow.dist)}" stdDeviation="${n(ef.shadow.blur / 2)}" flood-color="${colorHex(d, ef.shadow.color)}" flood-opacity="${ef.shadow.alpha ?? 0.5}"/>`); }
   ctx.defs.push(`<filter id="${id}" x="-30%" y="-30%" width="160%" height="160%">${parts.join('')}</filter>`);
   return ` filter="url(#${id})"`;
 }

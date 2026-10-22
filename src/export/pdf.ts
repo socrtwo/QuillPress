@@ -27,7 +27,7 @@ import { layoutStory, segRaise, hscaleOf, type LaidLine, type FlowBox } from '..
 import { PdfFonts, type EmbeddedFace, type FontLoader } from './fonts/embed';
 import { imageObj, deflate, pictureFilter, type ImageEntry } from './pdfImages';
 import { pathOps, rgb, n, fillPath, fillColor, lineEndsOps, type PaintCtx, type PathEnds } from './pdfPaint';
-import { effectsOps } from './pdfEffects';
+import { effectsOps, softEdgeGs } from './pdfEffects';
 
 export interface PdfOptions {
   /** Include the bleed area (page box grows by the bleed; TrimBox marks the page). */
@@ -156,6 +156,8 @@ type Matrix = [number, number, number, number, number, number];
 
 interface Ctx extends PaintCtx {
   w: Writer;
+  /** Extra ExtGState resource entries (soft-edge masks), `/Name obj 0 R`. */
+  extGs: string[];
   fontSet: PdfFonts;
   fonts: Map<string, number>;
   fontRes: string[];
@@ -490,6 +492,14 @@ async function itemOps(ctx: Ctx, e: Item, owner: Page | Master, fromMaster: bool
   const fill = e.fill ?? os?.fill;
   const line = e.line ?? os?.line;
   const at = `1 0 0 1 ${n(e.x)} ${n(e.y)} cm`;
+  // Soft edge: a feathered soft mask over the object's outline (its box for groups, lines and tables),
+  // set in the object's own coordinates before anything of it is drawn.
+  const soft = e.effects?.softEdge;
+  if (soft && soft > 0) {
+    const outline = e.kind === 'shape' ? pathOps(geometryPath(e.geom, e.w, e.h, e.adj, e.path).d) : e.kind === 'text' || e.kind === 'picture' ? pathOps(geometryPath(e.geom || 'rect', e.w, e.h).d) : `0 0 ${n(e.w)} ${n(e.h)} re`;
+    const gs = await softEdgeGs(ctx, outline, soft, e.kind === 'shape');
+    if (gs) out.push(`${at} ${gs} gs 1 0 0 1 ${n(-e.x)} ${n(-e.y)} cm`);
+  }
   switch (e.kind) {
     // Children are in page coordinates; the group only adds its rotation and flips (above).
     case 'group': for (const c of e.children) await itemOps(ctx, c, owner, fromMaster, out); break;
@@ -624,12 +634,13 @@ export async function pubToPdf(pub: Pub, opts: PdfOptions = {}): Promise<Uint8Ar
   const pageObjs: number[] = [];
   const pages = opts.pages ? pub.pages.filter((p) => opts.pages!.includes(p.id)) : pub.pages;
   const gsObjs = new Set<number>();
+  const extGs: string[] = [];
   let missing = 0;
   const pageData: { content: number; links: Ctx['links'] }[] = [];
   for (let pi = 0; pi < pages.length; pi++) {
     const page = pages[pi];
     const pageIndex = pub.pageIndex(page.id);
-    const ctx: Ctx = { pub, w, fontSet, fonts, images, fontRes, imgRes, shadings, patterns, patRes, pageMatrix, H, pad, bleed, opts, pageIndex, m: [...IDENTITY], links: [], missing: 0 };
+    const ctx: Ctx = { pub, w, fontSet, fonts, images, fontRes, imgRes, shadings, patterns, patRes, pageMatrix, H, pad, bleed, opts, pageIndex, m: [...IDENTITY], links: [], missing: 0, extGs };
     const ops: string[] = [];
     // Flip to y-down page coordinates: origin at the top-left of the trim box.
     ops.push(`${pageMatrix} cm`);
@@ -658,7 +669,7 @@ export async function pubToPdf(pub: Pub, opts: PdfOptions = {}): Promise<Uint8Ar
   lastWarnings = [...fontSet.warnings];
   if (missing) lastWarnings.push(`${missing} character${missing === 1 ? '' : 's'} had no glyph in the embedded fonts and print as "?" in the PDF.`);
   const gsRes = [...gsObjs].map((a) => `/GSa${a} ${w.add(`<< /Type /ExtGState /ca ${n(a / 100)} /CA ${n(a / 100)} >>`)} 0 R`);
-  const resources = `<< /Font << ${fontRes.join(' ')} >> /XObject << ${imgRes.join(' ')} >> /ExtGState << ${gsRes.join(' ')} >> /Shading << ${shadings.join(' ')} >> /Pattern << ${patRes.join(' ')} >> /ProcSet [/PDF /Text /ImageB /ImageC] >>`;
+  const resources = `<< /Font << ${fontRes.join(' ')} >> /XObject << ${imgRes.join(' ')} >> /ExtGState << ${[...gsRes, ...extGs].join(' ')} >> /Shading << ${shadings.join(' ')} >> /Pattern << ${patRes.join(' ')} >> /ProcSet [/PDF /Text /ImageB /ImageC] >>`;
   const resObj = w.add(resources);
   pages.forEach((_page, i) => {
     const boxes = `/MediaBox [0 0 ${n(W)} ${n(H)}]${pad ? ` /TrimBox [${n(pad)} ${n(pad)} ${n(pad + pub.size.w)} ${n(pad + pub.size.h)}] /BleedBox [${n(pad - bleed)} ${n(pad - bleed)} ${n(pad + pub.size.w + bleed)} ${n(pad + pub.size.h + bleed)}]` : ''}`;

@@ -162,3 +162,31 @@ describe('commands', () => {
     expect(pt.skew).toBeUndefined();
   });
 });
+
+describe('soft edges', () => {
+  const softPub = () => {
+    const p = Pub.blank({ w: 400, h: 300 }, { pages: 1 });
+    p.pages[0].items.push({ id: 'e', kind: 'shape', geom: 'ellipse', x: 50, y: 50, w: 200, h: 120, fill: { type: 'solid', color: '#C00000' }, effects: { softEdge: 20, shadow: { color: '#000000', blur: 6, dist: 6, dir: 45, alpha: 0.5 }, glow: { color: '#FFC000', rad: 8 } } } as Item);
+    return p;
+  };
+
+  it('feathers the object on screen with a round mask and chains glow and shadow onto it', () => {
+    const svg = pageSvg(softPub(), softPub().pages[0], {});
+    const filter = /<filter[\s\S]*?<\/filter>/.exec(svg)![0];
+    // Round feather: blur of the alpha remapped to 2a − 1 (no square erosion), contents kept sharp.
+    expect(filter).toContain(`<feGaussianBlur in="SourceAlpha" stdDeviation="${Math.round((20 / 2.25) * 100) / 100}" result="sb"/>`);
+    expect(filter).toContain('<feFuncA type="linear" slope="2" intercept="-1"/>');
+    expect(filter).toContain('<feComposite in="SourceGraphic" in2="sf" operator="in" result="soft"/>');
+    expect(filter).not.toContain('operator="erode"');
+    // The glow sits behind the softened object and the shadow is cast by both.
+    expect(filter).toContain('<feMergeNode in="soft"/>');
+    expect(filter).toContain('<feDropShadow in="glowed"');
+  });
+
+  it('exports a valid PDF without a canvas, drawing the object unfaded', async () => {
+    const pdf = new TextDecoder('latin1').decode(await pubToPdf(softPub()));
+    expect(pdf).not.toContain('/SMask << /Type /Mask');
+    expect(pdf).toMatch(/0\.753 0 0 rg|0\.75\d* 0 0 rg/);
+    expect(pdf.trimEnd().endsWith('%%EOF')).toBe(true);
+  });
+});

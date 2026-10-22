@@ -8,6 +8,11 @@
  * placed over the outline's bounds plus the blur margin, so the effect sits exactly where the screen
  * draws it, at about 150 dpi. Without a canvas (Node, tests) the shadow falls back to the hard-edged
  * offset copy and the glow is left out.
+ *
+ * Soft edges fade the object itself: its outline is filled, blurred by radius / 2.25 and the coverage
+ * remapped to 2a − 1 (0 at the edge, about 1 a radius inside, as layout programs draw it; the screen's
+ * SVG filter does the same), and the result becomes a luminosity soft mask set before the object is
+ * drawn; its drop shadow is cast by that feathered coverage. Without a canvas the object is drawn unfaded.
  */
 import type { Effects } from '../model/types';
 import { colorHex } from '../model/styles';
@@ -74,7 +79,7 @@ function trace(c: Canvas2D, segs: Seg[], k: number, ox: number, oy: number): voi
 }
 
 /** The blurred coverage of a path: an 8-bit mask (rows top to bottom) and where it sits, in the path's coordinates. */
-function blurMask(ops: string, evenOdd: boolean, blur: number, spread: number, opacity: number): { x: number; y: number; w: number; h: number; pw: number; ph: number; mask: Uint8Array } | null {
+function blurMask(ops: string, evenOdd: boolean, blur: number, spread: number, opacity: number, feather = 0): { x: number; y: number; w: number; h: number; pw: number; ph: number; mask: Uint8Array } | null {
   const p = parsePdfPath(ops);
   if (!p) return null;
   const sigma = Math.max(0, blur / 2);
@@ -87,6 +92,23 @@ function blurMask(ops: string, evenOdd: boolean, blur: number, spread: number, o
   const pw = Math.max(1, Math.ceil(w * k)), ph = Math.max(1, Math.ceil(h * k));
   const c = canvas2d(pw, ph);
   if (!c) return null;
+  if (feather > 0) {
+    // The shadow of a soft-edged object is cast by its feathered coverage, blurred again.
+    const f = canvas2d(pw, ph);
+    if (!f) return null;
+    const a = featherInto(f, p.segs, evenOdd, feather, k, x, y, pw, ph);
+    const img = f.createImageData(pw, ph);
+    for (let i = 0; i < a.length; i++) img.data[i * 4 + 3] = a[i];
+    f.filter = 'none';
+    f.clearRect(0, 0, pw, ph);
+    f.putImageData(img, 0, 0);
+    c.filter = sigma > 0 ? `blur(${sigma * k}px)` : 'none';
+    c.drawImage((f as any).canvas, 0, 0);
+    const d2 = c.getImageData(0, 0, pw, ph).data;
+    const m2 = new Uint8Array(pw * ph);
+    for (let i = 0; i < m2.length; i++) m2[i] = Math.round(d2[i * 4 + 3] * opacity);
+    return { x, y, w, h, pw, ph, mask: m2 };
+  }
   c.filter = sigma > 0 ? `blur(${sigma * k}px)` : 'none';
   c.fillStyle = '#000';
   c.strokeStyle = '#000';
@@ -97,6 +119,58 @@ function blurMask(ops: string, evenOdd: boolean, blur: number, spread: number, o
   const mask = new Uint8Array(pw * ph);
   for (let i = 0; i < mask.length; i++) mask[i] = Math.round(data[i * 4 + 3] * opacity);
   return { x, y, w, h, pw, ph, mask };
+}
+
+/** The blur that, followed by the alpha remap 2a − 1, feathers an edge from 0 at the outline to about 0.98 a radius inside. */
+export const featherSigma = (radius: number) => radius / 2.25;
+
+/**
+ * Draws the feathered coverage of a path into `c` (cleared, pw × ph, path coordinates offset by x, y and
+ * scaled by k): the filled path blurred by featherSigma(radius), with its alpha remapped to 2a − 1, as the
+ * screen's filter does (src/render/page.ts effectsAttr). Returns the alpha values.
+ */
+function featherInto(c: Canvas2D, segs: Seg[], evenOdd: boolean, radius: number, k: number, x: number, y: number, pw: number, ph: number): Uint8Array {
+  c.filter = `blur(${featherSigma(radius) * k}px)`;
+  c.fillStyle = '#000';
+  trace(c, segs, k, x, y);
+  c.fill(evenOdd ? 'evenodd' : 'nonzero');
+  const data = c.getImageData(0, 0, pw, ph).data;
+  const a = new Uint8Array(pw * ph);
+  for (let i = 0; i < a.length; i++) a[i] = Math.max(0, data[i * 4 + 3] * 2 - 255);
+  return a;
+}
+
+/** Feathered coverage of a path for a soft edge of `radius`: 0 at the outline, about 1 a radius inside. */
+function featherMask(ops: string, evenOdd: boolean, radius: number): { x: number; y: number; w: number; h: number; pw: number; ph: number; mask: Uint8Array } | null {
+  const p = parsePdfPath(ops);
+  if (!p || !(radius > 0)) return null;
+  const x = p.box[0] - 1, y = p.box[1] - 1;
+  const w = p.box[2] - p.box[0] + 2, h = p.box[3] - p.box[1] + 2;
+  if (!(w > 0 && h > 0) || w * h > 4e7) return null;
+  // About 200 dpi, fewer pixels for very large objects (the mask is smooth, so this costs nothing visible).
+  const k = Math.max(0.25, Math.min(2.8, Math.sqrt(4e6 / (w * h))));
+  const pw = Math.max(1, Math.ceil(w * k)), ph = Math.max(1, Math.ceil(h * k));
+  const c = canvas2d(pw, ph);
+  if (!c) return null;
+  return { x, y, w, h, pw, ph, mask: featherInto(c, p.segs, evenOdd, radius, k, x, y, pw, ph) };
+}
+
+/**
+ * An ExtGState that fades what is drawn after it by the soft edge of `path` (in the coordinates in
+ * effect when it is set): a luminosity soft mask whose group draws the feathered coverage as a grey
+ * image over a black backdrop. Returns the resource name to use with `gs`, or null without a canvas.
+ */
+export async function softEdgeGs(ctx: PaintCtx & { extGs: string[] }, path: string, radius: number, evenOdd = false): Promise<string | null> {
+  const m = featherMask(path, evenOdd, radius);
+  if (!m) return null;
+  const z = await deflate(m.mask);
+  const img = ctx.w.stream(`/Type /XObject /Subtype /Image /Width ${m.pw} /Height ${m.ph} /ColorSpace /DeviceGray /BitsPerComponent 8${z.filter}`, z.data);
+  const body = `q ${n(m.w)} 0 0 ${n(-m.h)} ${n(m.x)} ${n(m.y + m.h)} cm /M Do Q`;
+  const form = ctx.w.stream(`/Type /XObject /Subtype /Form /BBox [${n(m.x)} ${n(m.y)} ${n(m.x + m.w)} ${n(m.y + m.h)}] /Group << /S /Transparency /CS /DeviceGray >> /Resources << /XObject << /M ${img} 0 R >> >>`, body);
+  const name = `/GSse${ctx.extGs.length + 1}`;
+  const gs = ctx.w.add(`<< /Type /ExtGState /SMask << /Type /Mask /S /Luminosity /G ${form} 0 R /BC [0] >> >>`);
+  ctx.extGs.push(`${name} ${gs} 0 R`);
+  return name;
 }
 
 /** The operators placing a mask in a colour: a 1×1 image of the colour with the mask as its soft mask. */
@@ -114,7 +188,7 @@ async function maskOps(ctx: PaintCtx, m: { x: number; y: number; w: number; h: n
 /**
  * The effects drawn under an object whose outline is `path` (PDF path operators in the current
  * coordinates): the drop shadow (blurred as on screen, or the hard-edged copy without a canvas) and the
- * outer glow (canvas only). Soft edges are not exported.
+ * outer glow (canvas only). Soft edges are set separately (softEdgeGs) around the object itself.
  */
 export async function effectsOps(ctx: PaintCtx, effects: Effects | undefined, path: string, evenOdd = false): Promise<string> {
   if (!effects) return '';
@@ -124,7 +198,7 @@ export async function effectsOps(ctx: PaintCtx, effects: Effects | undefined, pa
     const hex = colorHex(ctx.pub.data, sh.color);
     let done = false;
     if (sh.blur > 0 && hex && hex !== 'none') {
-      const m = blurMask(path, evenOdd, sh.blur, 0, Math.max(0, Math.min(1, sh.alpha ?? 0.5)));
+      const m = blurMask(path, evenOdd, sh.blur, 0, Math.max(0, Math.min(1, sh.alpha ?? 0.5)), effects.softEdge || 0);
       if (m) {
         const a = (sh.dir * Math.PI) / 180;
         out.push(await maskOps(ctx, m, rgb(hex), Math.cos(a) * sh.dist, Math.sin(a) * sh.dist));
