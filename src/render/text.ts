@@ -635,29 +635,39 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
       return Math.max(1, avail);
     };
 
-    const flushLine = (last: boolean): boolean => {
+    // Index in toks of the current line's first token (-1: none yet; -2: the line starts inside a word
+    // broken by characters, which cannot be laid out again from a token).
+    let lineStart = -1;
+    let rewindTo = 0;
+    /**
+     * Places the line. When it does not fit, it moves to the next box; a line that started at a token is
+     * then broken again from that token at the new box's width ('rewind'), since the break was chosen
+     * for the old box. 'stop' when no box is left.
+     */
+    const flushLine = (last: boolean): 'ok' | 'stop' | 'rewind' => {
       const r = place(last);
-      if (r === 'ok') return true;
-      // Does not fit in this box: move to the next box; retry there.
-      const movingWholePara = lineNo === 0 && !(st.keepWithNext && false);
+      if (r === 'ok') { lineStart = -1; return 'ok'; }
       if (!nextBox()) {
         overset = { para: pi, off: lineToks.length ? lineToks[0].off : paraText(p).length };
         lineToks = [];
-        return false;
+        return 'stop';
       }
-      if (movingWholePara) { /* the paragraph restarts in the new box: nothing placed yet */ }
+      if (lineStart >= 0) { rewindTo = lineStart; lineToks = []; lineStart = -1; return 'rewind'; }
       const r2 = place(last);
-      if (r2 === 'ok') return true;
+      if (r2 === 'ok') { lineStart = -1; return 'ok'; }
       overset = { para: pi, off: lineToks.length ? lineToks[0].off : 0 };
       lineToks = [];
-      return false;
+      return 'stop';
     };
+    const startLine = () => { if (!lineToks.length && lineStart === -1) lineStart = ti; };
 
     let lineW = 0;
-    for (ti = 0; ti < toks.length; ti++) {
+    let startTi = 0;
+    retry: for (;;) {
+    for (ti = startTi; ti < toks.length; ti++) {
       const t = toks[ti];
-      if (t.br) { lineToks.push(t); if (!flushLine(false)) break outer; lineW = 0; continue; }
-      if (t.tab) { lineToks.push(t); const stops = (st.tabs || []).map((tb) => tb.pos).filter((pz) => pz > lineW + 0.5); lineW = stops.length ? stops[0] : (Math.floor(lineW / tabInt) + 1) * tabInt; continue; }
+      if (t.br) { startLine(); lineToks.push(t); const fr = flushLine(false); if (fr === 'stop') break outer; lineW = 0; if (fr === 'rewind') ti = rewindTo - 1; continue; }
+      if (t.tab) { startLine(); lineToks.push(t); const stops = (st.tabs || []).map((tb) => tb.pos).filter((pz) => pz > lineW + 0.5); lineW = stops.length ? stops[0] : (Math.floor(lineW / tabInt) + 1) * tabInt; continue; }
       const avail = availFor(first, lineNo);
       const w = t.w;
       if (!t.space && lineW + w > avail + 0.01 && lineToks.some((x) => !x.space && !x.tab)) {
@@ -668,15 +678,19 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
           for (const pt of pts) { const hw = m(t.text.slice(0, pt) + '-', t.css); if (lineW + hw <= avail) best = pt; else break; }
           if (best > 0) {
             lineToks.push({ ...t, text: t.text.slice(0, best) + '-', w: m(t.text.slice(0, best) + '-', t.css) });
-            if (!flushLine(false)) break outer;
+            const fr = flushLine(false);
+            if (fr === 'stop') break outer;
+            if (fr === 'rewind') { ti = rewindTo - 1; lineW = 0; continue; }
             const rest = t.text.slice(best);
             toks.splice(ti + 1, 0, { ...t, text: rest, off: t.off + best, w: m(rest, t.css) });
             lineW = 0;
             continue;
           }
         }
-        if (!flushLine(false)) break outer;
+        const fr = flushLine(false);
+        if (fr === 'stop') break outer;
         lineW = 0;
+        if (fr === 'rewind') { ti = rewindTo - 1; continue; }
       }
       if (!t.space || lineToks.some((x) => !x.space)) {
         const avail2 = availFor(first, lineNo);
@@ -687,21 +701,29 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
           for (const ch of t.text) {
             const cw = m(chunk + ch, t.css);
             if (cw > avail2 - lineW && chunk) {
+              startLine();
               lineToks.push({ ...t, text: chunk, off: coff, w: m(chunk, t.css) });
-              if (!flushLine(false)) break outer;
+              // A line that ends inside the broken word stays as broken (its chunks are not tokens).
+              lineStart = -2;
+              if (flushLine(false) === 'stop') break outer;
               coff += chunk.length;
               chunk = ch; lineW = 0;
             } else chunk += ch;
           }
-          if (chunk) { lineToks.push({ ...t, text: chunk, off: coff, w: m(chunk, t.css) }); lineW += m(chunk, t.css); }
+          if (chunk) { if (!lineToks.length) lineStart = -2; lineToks.push({ ...t, text: chunk, off: coff, w: m(chunk, t.css) }); lineW += m(chunk, t.css); }
           continue;
         }
+        startLine();
         lineToks.push(t);
         lineW += w;
       }
     }
-    if (overset) break;
-    if (!flushLine(true)) break;
+    if (overset) break outer;
+    const fr = flushLine(true);
+    if (fr === 'rewind') { startTi = rewindTo; lineW = 0; continue retry; }
+    if (fr === 'stop') break outer;
+    break;
+    }
     y = lastY + spAfter;
     void paraLineIdx;
   }

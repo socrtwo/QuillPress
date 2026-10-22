@@ -160,6 +160,29 @@ describe('Scribus .sla', () => {
     expect(pub.pages[0].items.some((e) => e.kind === 'picture' && !e.media)).toBe(true);
     expect(warnings.some((w) => /missing\.png/.test(w))).toBe(true);
   });
+
+  it('reads Scribus 1.5 groups with their nested members in page coordinates', async () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<SCRIBUSUTF8NEW Version="1.5.8"><DOCUMENT ANZPAGES="1" PAGEWIDTH="595.28" PAGEHEIGHT="841.89" ORIENTATION="0" UNITS="1">
+<MASTERPAGE PAGEXPOS="100" PAGEYPOS="20" PAGEWIDTH="595.28" PAGEHEIGHT="841.89" NAM="Normal"/>
+<PAGE PAGEXPOS="100" PAGEYPOS="20" PAGEWIDTH="595.28" PAGEHEIGHT="841.89" NUM="0" MNAM="Normal"/>
+<PAGEOBJECT XPOS="200" YPOS="120" WIDTH="150" HEIGHT="90" PTYPE="12" OwnPage="0" groupWidth="150" groupHeight="90">
+<PAGEOBJECT XPOS="200" YPOS="120" WIDTH="60" HEIGHT="40" PTYPE="6" OwnPage="0" PCOLOR="Red" gXpos="0" gYpos="0"/>
+<PAGEOBJECT XPOS="290" YPOS="170" WIDTH="60" HEIGHT="40" PTYPE="4" OwnPage="0" gXpos="90" gYpos="50"><StoryText><DefaultStyle/><ITEXT CH="Inside"/><para/></StoryText></PAGEOBJECT>
+</PAGEOBJECT>
+<PAGEOBJECT XPOS="100" YPOS="20" WIDTH="10" HEIGHT="10" PTYPE="12" OwnPage="0"/>
+</DOCUMENT></SCRIBUSUTF8NEW>`;
+    const { pub } = await importSla(new TextEncoder().encode(xml));
+    const items = pub.pages[0].items;
+    expect(items).toHaveLength(1); // the empty group is dropped
+    const g = items[0];
+    expect(g.kind).toBe('group');
+    if (g.kind !== 'group') return;
+    expect([g.x, g.y, g.w, g.h]).toEqual([100, 100, 150, 90]);
+    expect(g.children.map((c) => c.kind)).toEqual(['shape', 'text']);
+    expect([g.children[1].x, g.children[1].y]).toEqual([190, 150]);
+    expect(textOf(pub.story((g.children[1] as any).story)!.paras)).toBe('Inside');
+  });
 });
 
 describe('text and picture import', () => {

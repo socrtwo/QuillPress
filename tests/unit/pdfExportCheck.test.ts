@@ -166,6 +166,29 @@ describe('PDF export matches the screen', () => {
     expect(cssFont({}, 12, 'Franklin Gothic Book')).toContain('"Carlito"');
   });
 
+  it('breaks a line that moves to the next frame again at that frame\'s width', () => {
+    const p = Pub.blank();
+    const words = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ');
+    const a = p.newTextFrame({ x: 36, y: 36, w: 90, h: 40 }, [{ style: 'Body', runs: [{ text: words }] }]);
+    const b = p.newTextFrame({ x: 36, y: 200, w: 400, h: 300 });
+    b.story = a.story; a.next = b.id; b.prev = a.id;
+    p.pages[0].items.push(a, b);
+    const lb = frameLines(p, b).lines;
+    const la = frameLines(p, a).lines;
+    expect(la.length).toBeGreaterThan(0);
+    // The first line of the wide frame is as full as its others, not the narrow frame's leftover break.
+    expect(lb[0].width).toBeGreaterThan(300);
+    expect(lb[0].segs.length).toBeGreaterThan(la[0].segs.length);
+  });
+
+  it('sizes arrowheads at three line widths, on screen and in the PDF', async () => {
+    const p = Pub.blank();
+    p.pages[0].items.push({ id: newId('ln'), kind: 'line', x: 36, y: 100, w: 200, h: 0, line: { fill: { type: 'solid', color: '#000000' }, width: 6, tail: 'triangle' } } as Item);
+    expect(pageSvg(p, p.pages[0])).toContain('markerWidth="3" markerHeight="3"');
+    const s = latin1(await pubToPdf(p, { fontLoader }));
+    expect(s).toContain('1.8 0 0 1.8 0 0 cm'); // 3 × 6 pt over the 10-unit marker box
+  });
+
   it('reads JPEG frame size, Adobe marker and EXIF orientation', () => {
     // SOI, APP1 Exif (little-endian TIFF, one IFD entry: orientation 6), APP14 Adobe, SOF0 8×4 3 components.
     const exif = [0x45, 0x78, 0x69, 0x66, 0, 0, 0x49, 0x49, 0x2a, 0, 8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0];

@@ -95,17 +95,19 @@ export async function importSla(data: Uint8Array): Promise<SlaImport> {
   const objEls = kids(d).filter((k) => k.localName === 'PAGEOBJECT' || k.localName === 'MASTEROBJECT');
   const frameById = new Map<string, TextFrame>();
   const links: { frame: TextFrame; next: string }[] = [];
-  const groups = new Map<number, Item[]>();
   let pictures = 0, missingPics = 0;
   const missingNames: string[] = [];
   let objectIndex = -1;
-  for (const o of objEls) {
+  // Scribus 1.5 writes a group's members as PAGEOBJECT elements nested inside the group's element,
+  // with document positions like any other object: they become the group's children, placed with
+  // the group's page offset (page coordinates, as the editor keeps group children).
+  const importObject = async (o: Element, inGroup?: { sink: Item[]; off: { x: number; y: number } }): Promise<void> => {
     objectIndex++;
     const onMaster = o.localName === 'MASTEROBJECT';
     const ownPage = num(o, 'OwnPage', -1);
-    const owner: { items: Item[] } | undefined = onMaster ? masters.get(o.getAttribute('OnMasterPage') || '') || P.masters[0] : pageByNum.get(ownPage) || P.pages[Math.max(0, Math.min(P.pages.length - 1, ownPage))];
-    if (!owner) continue;
-    const off = onMaster ? masterOffsets.get(o.getAttribute('OnMasterPage') || '') || { x: 0, y: 0 } : pageOffsets.get(ownPage) || { x: 0, y: 0 };
+    const owner: { items: Item[] } | undefined = inGroup ? { items: inGroup.sink } : onMaster ? masters.get(o.getAttribute('OnMasterPage') || '') || P.masters[0] : pageByNum.get(ownPage) || P.pages[Math.max(0, Math.min(P.pages.length - 1, ownPage))];
+    if (!owner) return;
+    const off = inGroup ? inGroup.off : onMaster ? masterOffsets.get(o.getAttribute('OnMasterPage') || '') || { x: 0, y: 0 } : pageOffsets.get(ownPage) || { x: 0, y: 0 };
     const x = num(o, 'XPOS', 0) - off.x, y = num(o, 'YPOS', 0) - off.y, w = num(o, 'WIDTH', 100), h = num(o, 'HEIGHT', 100);
     const ptype = num(o, 'PTYPE', 4);
     const rot = num(o, 'ROT', 0) || undefined;
@@ -152,17 +154,19 @@ export async function importSla(data: Uint8Array): Promise<SlaImport> {
       item = { id: newId('sh'), kind: 'shape', geom, ...base, ...(fill ? { fill } : { fill: { type: 'none' } }), ...(line ? { line } : {}), ...(wrap ? { wrap } : {}), ...(pts ? { path: [{ d: pts, w, h }] } : {}) };
       if (ptype === 7 && item.kind === 'shape') item.fill = { type: 'none' };
     } else if (ptype === 12) {
-      // Group: children follow with their own OwnPage; we approximate by a group frame later.
-      item = { id: newId('grp'), kind: 'group', ...base, children: [] };
-      groups.set(num(o, 'NUMPO', -1), (item as any).children);
+      const g: Item = { id: newId('grp'), kind: 'group', ...base, children: [] };
+      for (const c of kids(o)) if (c.localName === 'PAGEOBJECT' || c.localName === 'MASTEROBJECT') await importObject(c, { sink: g.children, off });
+      // A group whose members could not be read is dropped rather than left as an empty box.
+      if (g.children.length) item = g;
     } else if (ptype === 16) {
       const rows = num(o, 'Rows', 1), cols = num(o, 'Columns', 1);
       item = { id: newId('tbl'), kind: 'table', ...base, cols: Array.from({ length: cols }, () => w / cols), rows: Array.from({ length: rows }, () => ({ h: h / rows, cells: Array.from({ length: cols }, () => ({ text: [{ style: 'Table Text', runs: [] }] })) })) };
       warnings.push('Table contents are not imported from Scribus files yet; the table grid was kept.');
     }
-    if (!item) continue;
+    if (!item) return;
     owner.items.push(item);
-  }
+  };
+  for (const o of objEls) await importObject(o);
   for (const l of links) { const n = frameById.get(l.next); if (n && n !== l.frame) { l.frame.next = n.id; n.prev = l.frame.id; if (n.story !== l.frame.story) { const dead = n.story; for (const f of pub.textFrames()) if (f.story === dead) f.story = l.frame.story; } } }
   // Linked frames shared one story in Scribus (the text is stored on the first): keep the head's text.
   pub.pruneStories();
