@@ -139,6 +139,59 @@ describe.skipIf(!existsSync(SAMPLES))('PageMaker real files', () => {
     expect(r.pub.pages[4].items).toHaveLength(0);
   });
 
+  it('keeps line breaks that fall at the end of a character run, and centres them', async () => {
+    const r = await importPageMaker(load('sub_records.pmd'), 'sub_records.pmd');
+    const frames = flat(r.pub.pages[0].items).filter((i) => i.kind === 'text') as TextFrame[];
+    const paras = (f: TextFrame) => r.pub.story(f.story)!.paras;
+    const address = frames.find((f) => textOf(paras(f)).startsWith('Street Address'))!;
+    const p = paras(address)[0];
+    expect(p.align).toBe('ctr');
+    expect(p.runs.filter((x) => x.br)).toHaveLength(2);
+    expect(p.runs.filter((x) => !x.br).map((x) => x.text)).toEqual(['Street Address, City, ST  91234', 'Tel: 555 555 5555  Fax: 555 555 5555', 'email@address.com  www.company123.com']);
+    // The template's instruction block: seven lines in one hanging-indent paragraph.
+    const block = frames.find((f) => textOf(paras(f)).includes('Template Type'))!;
+    expect(paras(block)[0].runs.filter((x) => x.br).length).toBeGreaterThanOrEqual(6);
+    // The white LOGO letters over the coloured squares.
+    const letters = frames.filter((f) => /^[LOG]$/.test(textOf(paras(f))));
+    expect(letters.map((f) => textOf(paras(f))).sort()).toEqual(['G', 'L', 'O', 'O']);
+    expect(paras(letters[0])[0].runs[0].color).toBe('#ffffff');
+  });
+
+  it('sets every paragraph property so the Body style does not leak in, with PageMaker leading', async () => {
+    const r = await importPageMaker(load('para-format.6'), 'para-format.6');
+    const paras = r.pub.story((r.pub.pages[0].items[0] as TextFrame).story)!.paras;
+    const by = (s: string) => paras.find((p) => textOf([p]).startsWith(s))!;
+    expect(by('Aligned to center')).toMatchObject({ spaceBefore: 0, spaceAfter: 0, indent: 0, marL: 0, marR: 0, lineSpacing: 120, lineSpacingPt: false });
+    expect(by('Auto leading 110%')).toMatchObject({ lineSpacing: 110, lineSpacingPt: false });
+    // Fixed leading is a character attribute: 115 pt for the 140 pt display letters.
+    const sr = await importPageMaker(load('sub_records.pmd'), 'sub_records.pmd');
+    const big = flat(sr.pub.pages[1].items).filter((i) => i.kind === 'text').map((f) => sr.pub.story((f as TextFrame).story)!.paras[0]).find((p) => p.runs[0]?.size === 140)!;
+    expect(big).toMatchObject({ lineSpacing: 115, lineSpacingPt: true });
+  });
+
+  it('sizes superscripts once (the text engine scales shifted runs itself) and reads paragraph rules', async () => {
+    const r = await importPageMaker(load('text_formatting.pmd'), 'text_formatting.pmd');
+    const runs = r.pub.story((r.pub.pages[0].items[0] as TextFrame).story)!.paras.flatMap((p) => p.runs);
+    const sup = runs.find((x) => x.text === '34')!;
+    expect(sup.size! * 0.67).toBeCloseTo(36 * 0.583, 1);
+    const rule = await importPageMaker(load('rule'), 'rule.pmd');
+    const para = rule.pub.story((rule.pub.pages[0].items[0] as TextFrame).story)!.paras[0];
+    expect(para.ruleAbove?.width).toBe(2.5);
+  });
+
+  it('puts objects PageMaker marks non-printing on their own layer', async () => {
+    const r = await importPageMaker(load('sub_records.pmd'), 'sub_records.pmd');
+    const layer = r.pub.data.layers.find((l) => l.name === 'Non-printing (PageMaker)')!;
+    expect(layer).toBeTruthy();
+    const on = (pg: number) => r.pub.pages[pg].items.filter((i) => i.layer === layer.id);
+    // The instruction block (text and frame) and the fold line on page 1, the fold line on page 2.
+    expect(on(0).map((i) => i.kind).sort()).toEqual(['line', 'shape', 'text']);
+    expect(on(1).map((i) => i.kind)).toEqual(['line']);
+    expect(r.warnings.some((w) => /non-printing/.test(w))).toBe(true);
+    const plain = await importPageMaker(load('A4doc.pmd'), 'A4doc.pmd');
+    expect(plain.pub.data.layers).toHaveLength(1);
+  });
+
   it('opens every sample without throwing and never falls back to the harvest', async () => {
     const { readdirSync } = await import('node:fs');
     for (const name of readdirSync(SAMPLES)) {

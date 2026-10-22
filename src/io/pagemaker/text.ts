@@ -10,6 +10,8 @@ import type { Paragraph, Run, RunProps, ParaProps } from '../../model/types';
 
 export interface PmChar {
   length: number; font: number; size: number; color: number; tint: number;
+  /** Leading in tenths of a point; 0xffff is automatic leading. */
+  leading: number;
   bold: boolean; italic: boolean; underline: boolean; outline: boolean; shadow: boolean; strike: boolean;
   sup: boolean; sub: boolean; allCaps: boolean; smallCaps: boolean;
   /** Thousandths of an em. */
@@ -24,6 +26,8 @@ export interface PmPara {
   /** Shape units. */
   left: number; first: number; right: number; before: number; after: number;
   keepTogether: boolean; keepWithNext: boolean;
+  /** Automatic leading as a percentage of the type size (PageMaker's default is 120). */
+  autoLeading: number;
   ruleAbove?: PmRule; ruleBelow?: PmRule;
 }
 
@@ -54,8 +58,7 @@ export function readTextBlock(file: PmFile, id: number): PmText {
     for (let i = 0; i < rec.count; i++) {
       try {
         const r = recordAt(file, rec, i);
-        const length = r.u16(), font = r.u16(), size = r.u16();
-        r.skip(2);
+        const length = r.u16(), font = r.u16(), size = r.u16(), leading = r.u16();
         const color = r.u16();
         const f = r.u16();
         r.skip(4);
@@ -64,7 +67,7 @@ export function readTextBlock(file: PmFile, id: number): PmText {
         const superSubSize = r.u16(), subPos = r.u16(), superPos = r.u16();
         r.skip(2);
         const tint = r.u16();
-        chars.push({ length, font, size, color, tint, kerning, superSubSize, subPos, superPos, bold: !!(f & 1), italic: !!(f & 2), underline: !!(f & 4), outline: !!(f & 8), shadow: !!(f & 0x10), strike: !!(f & 0x100), sup: !!(f & 0x200), sub: !!(f & 0x400), allCaps: !!(f & 0x800), smallCaps: !!(f & 0x1000) });
+        chars.push({ length, font, size, leading, color, tint, kerning, superSubSize, subPos, superPos, bold: !!(f & 1), italic: !!(f & 2), underline: !!(f & 4), outline: !!(f & 8), shadow: !!(f & 0x10), strike: !!(f & 0x100), sup: !!(f & 0x200), sub: !!(f & 0x400), allCaps: !!(f & 0x800), smallCaps: !!(f & 0x1000) });
       } catch { break; }
     }
   }
@@ -79,13 +82,18 @@ export function readTextBlock(file: PmFile, id: number): PmText {
         const align = r.u8();
         r.skip(6);
         const left = r.i16(), first = r.i16(), right = r.i16(), before = r.u16(), after = r.u16(); // first is negative for hanging indents
-        r.skip(18);
+        // 20: pair-kerning threshold (tenths of a point), 22: automatic leading (%), 24–29: word spacing
+        // minimum, maximum, desired (%), 30–35: letter spacing minimum, maximum, desired (%), 36: default
+        // tab interval (twips).
+        r.skip(2);
+        const autoLeading = r.u16();
+        r.skip(14);
         r.skip(1); // hyphens in a row
         r.skip(1);
         const keep = r.u16();
         r.skip(2);
         const ruleAbove = readRule(r), ruleBelow = readRule(r);
-        paras.push({ length, hyphenate: !!(flags & 0x8), align, left, first, right, before, after, keepTogether: !!(keep & 1), keepWithNext: ((keep >> 1) & 3) > 0, ruleAbove, ruleBelow });
+        paras.push({ length, hyphenate: !!(flags & 0x8), align, left, first, right, before, after, keepTogether: !!(keep & 1), keepWithNext: ((keep >> 1) & 3) > 0, autoLeading: autoLeading > 0 && autoLeading < 1000 ? autoLeading : 120, ruleAbove, ruleBelow });
       } catch { break; }
     }
   }
@@ -97,7 +105,7 @@ function readRule(r: { u16: () => number; u8: () => number; u32: () => number; s
   if (!(flags & 1)) { r.skip(16); return undefined; }
   const type = r.u8();
   r.skip(1);
-  const width = (r.u32() >> 8) & 0xffff;
+  const width = r.u32() / 256; // fifths of a point, 24.8 fixed point (as shape stroke widths)
   const color = r.u16(), tint = r.u16();
   r.skip(6);
   return { type, width, color, tint };
@@ -118,12 +126,17 @@ export function tinted(color: string, tint: number): string {
   return '#' + c.map((v) => Math.round(v + (255 - v) * (1 - k)).toString(16).padStart(2, '0')).join('');
 }
 
+/** Scale the text engine applies to runs with a baseline shift (src/render/text.ts). */
+const SHIFTED_RUN_SCALE = 0.67;
+
 export function runProps(c: PmChar, env: TextEnv): RunProps {
   const p: RunProps = {};
   const font = env.fonts[c.font];
   if (font) p.font = font;
   let size = c.size / 10;
-  if ((c.sup || c.sub) && c.superSubSize > 0) size = size * (c.superSubSize / 1000);
+  // The text engine sets any run with a baseline shift at 67% of its size; PageMaker stores the
+  // superscript/subscript size as a fraction of the type size, so the run size is chosen to land there.
+  if ((c.sup || c.sub) && c.superSubSize > 0) size = size * (c.superSubSize / 1000) / SHIFTED_RUN_SCALE;
   if (size > 0) p.size = r2(size);
   if (c.bold) p.b = true;
   if (c.italic) p.i = true;
@@ -138,16 +151,19 @@ export function runProps(c: PmChar, env: TextEnv): RunProps {
   return p;
 }
 
+/** Automatic leading when a paragraph record does not say: PageMaker's default is 120% of the point size. */
+const AUTO_LEADING = 1.2;
+
+/**
+ * Paragraph properties, all set explicitly so the importing style's defaults (space after, first-line
+ * indent, hyphenation) never leak into PageMaker text.
+ */
 export function paraProps(p: PmPara, env: TextEnv): ParaProps {
-  const o: ParaProps = {};
-  const align = (['l', 'r', 'ctr', 'just', 'justAll'] as const)[p.align];
-  if (align && align !== 'l') o.align = align;
-  if (p.left) o.marL = pt(p.left);
-  if (p.right) o.marR = pt(p.right);
-  if (p.first) o.indent = pt(p.first);
-  if (p.before) o.spaceBefore = pt(p.before);
-  if (p.after) o.spaceAfter = pt(p.after);
-  if (p.hyphenate) o.hyphenate = true;
+  const o: ParaProps = {
+    align: (['l', 'r', 'ctr', 'just', 'justAll'] as const)[p.align] || 'l',
+    marL: pt(p.left), marR: pt(p.right), indent: pt(p.first),
+    spaceBefore: pt(p.before), spaceAfter: pt(p.after), hyphenate: p.hyphenate,
+  };
   if (p.keepTogether) o.keepLines = true;
   if (p.keepWithNext) o.keepWithNext = true;
   const rule = (r: PmRule | undefined) => (r ? { width: r2(Math.max(0.25, r.width / 5)), color: tinted(env.colors[r.color] || '#000000', r.tint) } : undefined);
@@ -181,7 +197,9 @@ export function textParagraphs(t: PmText, env: TextEnv, style = 'Body'): Paragra
     for (const sp of spans) {
       const s = Math.max(a, sp.start), e = Math.min(b, sp.end);
       if (s >= e) continue;
-      const piece = text.slice(s, e).replace(/\r$/, '');
+      // A return inside a paragraph is a line break; only the paragraph's own last return ends it.
+      // (Character runs often end with a return, so stripping per run would lose the line breaks.)
+      const piece = e === b ? text.slice(s, e).replace(/\r$/, '') : text.slice(s, e);
       const parts = piece.split(/[\r\n]/);
       parts.forEach((part, k) => {
         if (k > 0) runs.push({ text: '', br: true });
@@ -189,11 +207,34 @@ export function textParagraphs(t: PmText, env: TextEnv, style = 'Body'): Paragra
         if (clean) runs.push({ text: clean, ...sp.props });
       });
     }
-    const pp = t.paras[i] ? paraProps(t.paras[i], env) : {};
+    const pp: ParaProps = t.paras[i] ? paraProps(t.paras[i], env) : { spaceBefore: 0, spaceAfter: 0, indent: 0, hyphenate: false };
+    Object.assign(pp, leadingOf(t.chars, a, b, t.paras[i]?.autoLeading ?? AUTO_LEADING * 100));
     out.push({ style, runs: merge(runs), ...pp });
   });
   if (!out.length) out.push({ style, runs: [] });
   return out;
+}
+
+/**
+ * Leading is a character attribute in PageMaker (a line takes the largest leading on it); the model has
+ * one leading per paragraph. The paragraph takes the leading carried by most of its characters:
+ * automatic leading becomes the paragraph's auto-leading percentage (which the text engine applies per
+ * line to the largest type on it, as PageMaker does), a fixed leading becomes points.
+ */
+function leadingOf(chars: PmChar[], a: number, b: number, autoPct: number): Pick<ParaProps, 'lineSpacing' | 'lineSpacingPt'> {
+  const weight = new Map<number, number>(); // leading in tenths of a point (0 = automatic) → characters
+  let pos = 0;
+  for (const c of chars) {
+    const s = pos, e = pos + c.length;
+    pos = e;
+    const n = Math.min(e, b) - Math.max(s, a);
+    if (n <= 0) continue;
+    const key = c.leading !== 0xffff && c.leading > 0 ? c.leading : 0;
+    weight.set(key, (weight.get(key) || 0) + n);
+  }
+  let best = 0, most = -1;
+  for (const [k, n] of weight) if (n > most) { best = k; most = n; }
+  return best ? { lineSpacing: r2(best / 10), lineSpacingPt: true } : { lineSpacing: autoPct, lineSpacingPt: false };
 }
 
 function merge(runs: Run[]): Run[] {

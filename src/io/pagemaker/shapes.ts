@@ -9,6 +9,7 @@
  */
 import { REC, recordAt, readPoint, withSeq, bytesOf, IDENTITY, type PmFile, type PmRecord, type PmXform, type Pt } from './records';
 import { readTextBlock, type PmText } from './text';
+import type { Reader } from '../qxp/blocks';
 
 export interface PmStroke { type: number; width: number; color: number; tint: number }
 export interface PmFill { type: number; color: number; tint: number }
@@ -28,7 +29,17 @@ export interface PmShape {
   pictureKind?: 'bitmap' | 'metafile';
   /** Members of a group, in drawing order. */
   children?: PmShape[];
+  /** PageMaker's "Non-Printing" attribute (shown on screen, left out of print). */
+  nonPrinting?: boolean;
 }
+
+/**
+ * Bytes 2–3 of every shape record are a flag word in the file's byte order. Bit 0x0004 marks the
+ * object non-printing: in the corpus it is set exactly on a template's instruction block (its text
+ * and frame) and on fold lines that run past the page edges, the objects a template designer keeps
+ * out of print. Bit 0x0040 is set on group members.
+ */
+const NON_PRINTING = 0x0004;
 
 export interface PmPage { shapes: PmShape[] }
 
@@ -85,6 +96,13 @@ function readShape(file: PmFile, c: PmRecord, k: number, xforms: Map<number, PmX
   const base = r.pos;
   const at = (o: number) => { r.seek(base + o); return r; };
   const type = r.u8();
+  const nonPrinting = !!(at(2).u16() & NON_PRINTING);
+  const s = readShapeBody(file, type, at, r, xforms);
+  if (s && !('marker' in s) && nonPrinting) s.nonPrinting = true;
+  return s;
+}
+
+function readShapeBody(file: PmFile, type: number, at: (o: number) => Reader, r: Reader, xforms: Map<number, PmXform>): PmShape | Marker | null {
   switch (type) {
     case 0x03: { // line
       const color = at(4).u16();

@@ -26,7 +26,10 @@ export async function importPageMaker(data: Uint8Array, name: string): Promise<L
   }
 }
 
-interface Ctx { pub: Pub; env: TextEnv; warnings: string[]; counts: Record<string, number>; missingPictures: number; metafiles: number }
+interface Ctx { pub: Pub; env: TextEnv; warnings: string[]; counts: Record<string, number>; missingPictures: number; metafiles: number; nonPrinting: number }
+
+/** Layer for objects PageMaker marks non-printing (QuillPress layers have no print switch of their own). */
+const NON_PRINTING_LAYER = 'pm-nonprinting';
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const pt = (units: number) => units / UNITS_PER_POINT;
@@ -42,7 +45,7 @@ async function readLayout(file: PmFile, name: string): Promise<LegacyImport> {
   if (!pmPages.length) throw new Error('no pages were found');
   const pub = Pub.blank(size, { facing: global.doubleSided, pages: 0 });
   pub.data.props.title = name.replace(/\.[^.]+$/, '');
-  const ctx: Ctx = { pub, env, warnings, counts: {}, missingPictures: 0, metafiles: 0 };
+  const ctx: Ctx = { pub, env, warnings, counts: {}, missingPictures: 0, metafiles: 0, nonPrinting: 0 };
   const master = pub.data.masters[0];
   const halfW = global.pageW / 2, halfH = global.pageH / 2;
   // Single-sided: shapes sit around the page center. Double-sided: each page record holds the
@@ -62,6 +65,11 @@ async function readLayout(file: PmFile, name: string): Promise<LegacyImport> {
     for (const { shape, origin } of placed[i]) {
       try {
         const item = await toItem(ctx, shape, origin);
+        if (item && shape.nonPrinting) {
+          if (!pub.data.layers.some((l) => l.id === NON_PRINTING_LAYER)) pub.data.layers.push({ id: NON_PRINTING_LAYER, name: 'Non-printing (PageMaker)', color: '#9e9e9e' });
+          item.layer = NON_PRINTING_LAYER;
+          ctx.nonPrinting++;
+        }
         if (item) page.items.push(item);
       } catch (e) { warnings.push(`An object on page ${i + 1} was skipped (${(e as Error).message}).`); }
     }
@@ -178,5 +186,6 @@ function summarize(ctx: Ctx, name: string): void {
   const pages = ctx.pub.pages.length;
   ctx.warnings.unshift(`PageMaker publication "${name}": ${pages} page${pages === 1 ? '' : 's'} read with ${parts.length ? parts.join(', ') : 'no objects'}. Text blocks are independent frames (PageMaker threads are not kept); master page items could not be identified in the file and were not imported; skew is ignored.`);
   if (ctx.missingPictures) ctx.warnings.push(`${ctx.missingPictures} placed picture${ctx.missingPictures === 1 ? '' : 's'} could not be decoded (PageMaker keeps a TIFF copy in the file; compressed or unusual TIFFs are not readable yet). Place the original picture files again.`);
+  if (ctx.nonPrinting) ctx.warnings.push(`${ctx.nonPrinting} object${ctx.nonPrinting === 1 ? ' is' : 's are'} marked non-printing in PageMaker (template instructions, fold lines); ${ctx.nonPrinting === 1 ? 'it is' : 'they are'} on the layer "Non-printing (PageMaker)": hide that layer before printing or exporting.`);
   if (ctx.metafiles) ctx.warnings.push(`${ctx.metafiles} placed Windows metafile${ctx.metafiles === 1 ? ' was' : 's were'} left as empty picture frames.`);
 }
