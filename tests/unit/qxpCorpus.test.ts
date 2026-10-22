@@ -273,4 +273,20 @@ describe.skipIf(!has)('QuarkXPress corpus', () => {
     expect(runs.every((x) => x.baseline === undefined)).toBe(true);
     expect(r.warnings.some((w) => /baseline shift/.test(w))).toBe(true);
   });
+
+  it('group members carry page coordinates inside their group, also across the spine of a spread', async () => {
+    for (const name of ['4.0_mac-groups', 'group.qxd', 'group-facing.qxd', 'q4_group']) {
+      const r = await load(name);
+      const groups = r.pub.data.pages.flatMap((p) => p.items).filter((i): i is GroupItem => i.kind === 'group');
+      expect(groups.length, name).toBeGreaterThan(0);
+      for (const g of groups) for (const c of g.children) {
+        // Rotated members (lines) can poke out of the box; their centre stays inside it.
+        const cx = c.x + c.w / 2, cy = c.y + c.h / 2;
+        expect(cx, `${name} ${c.name}`).toBeGreaterThanOrEqual(g.x - 1);
+        expect(cx, `${name} ${c.name}`).toBeLessThanOrEqual(g.x + g.w + 1);
+        expect(cy, `${name} ${c.name}`).toBeGreaterThanOrEqual(g.y - 1);
+        expect(cy, `${name} ${c.name}`).toBeLessThanOrEqual(g.y + g.h + 1);
+      }
+    }
+  });
 });

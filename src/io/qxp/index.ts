@@ -101,8 +101,15 @@ async function readLayout(bytes: Uint8Array, name: string, header: QxpHeader): P
 async function placeObjects(ctx: Ctx, qp: QxpPage, sides: Item[][], where: string): Promise<void> {
   const items: (Item | null)[] = [];
   const sideOf: number[] = [];
-  for (const o of qp.objects) {
-    const side = qp.offsets.length === 2 && o.bbox.left >= qp.offsets[1].left ? 1 : 0;
+  // Group members are measured from the page their outermost group sits on (a group can straddle the
+  // spine), so that a group and its members share one coordinate system.
+  const parent = new Map<number, number>();
+  qp.objects.forEach((o, i) => { for (const m of o.members || []) if (!parent.has(m) && m !== i) parent.set(m, i); });
+  const rootOf = (i: number) => { const seen = new Set<number>(); while (parent.has(i) && !seen.has(i)) { seen.add(i); i = parent.get(i)!; } return i; };
+  for (let i = 0; i < qp.objects.length; i++) {
+    const o = qp.objects[i];
+    const anchor = qp.objects[rootOf(i)];
+    const side = qp.offsets.length === 2 && anchor.bbox.left >= qp.offsets[1].left ? 1 : 0;
     sideOf.push(side);
     let item: Item | null = null;
     try { item = await toItem(ctx, o, qp.offsets[side]); } catch (e) { ctx.warnings.push(`An object on ${where} was skipped (${(e as Error).message}).`); }
