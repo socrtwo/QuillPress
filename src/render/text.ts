@@ -10,6 +10,7 @@
  */
 import type { Bullet, NumScheme, Paragraph, Run, RunProps, ParaProps, Tab, FootnoteOptions } from '../model/types';
 import { DEFAULT_FOOTNOTE_OPTIONS } from '../model/types';
+import { fontFamilyCss } from '../fonts';
 
 export interface MeasureFn { (text: string, font: string): number }
 
@@ -64,6 +65,8 @@ export interface FlowBox {
   excl?: Rect[];
   /** Page index the box is on (for page-number fields); -1 on masters. */
   page?: number;
+  /** Where the first line's baseline sits at the top of the box (the frame's setting; default ascent). */
+  firstBaseline?: 'ascent' | 'leading' | 'capHeight';
 }
 
 export interface Seg {
@@ -175,7 +178,9 @@ export interface LayoutOptions {
 }
 
 // small-caps is measured as drawn: the browser (screen) and the PDF writer set lowercase as capitals at 70%.
-export const cssFont = (st: RunProps, size: number, family: string) => `${st.i ? 'italic ' : ''}${st.caps === 'small' ? 'small-caps ' : ''}${st.b ? 'bold ' : ''}${Math.max(0.5, size)}px "${family}"`;
+// The family list is the one the screen draws with (fontFamilyCss: the font, then the bundled face it
+// falls back to), so text in a font that is not installed is measured in the face that is shown.
+export const cssFont = (st: RunProps, size: number, family: string) => `${st.i ? 'italic ' : ''}${st.caps === 'small' ? 'small-caps ' : ''}${st.b ? 'bold ' : ''}${Math.max(0.5, size)}px ${fontFamilyCss(family)}`;
 
 export function bulletText(b: Bullet | undefined, index: number): string {
   if (!b || b.kind === 'none') return '';
@@ -459,13 +464,18 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
 
     /** Line metrics: natural height from the leading, and the space above/below the baseline once anchored objects are counted. */
     const lineGeom = (fst: boolean, ln: number) => {
-      const sizes = lineToks.filter((t) => !t.br && !t.anchor).map((t) => t.size);
+      // Superscript and subscript text is set smaller but still occupies a line of its nominal size.
+      const sizes = lineToks.filter((t) => !t.br && !t.anchor).map((t) => (t.style.baseline ? t.size / SHIFTED_SIZE : t.size));
       const maxSize = sizes.length ? Math.max(...sizes) : endSize;
       const natural = maxSize * leadingPct;
       const height = Math.max(1, leadingPt || natural);
       const ascent = maxSize * 0.92;
       let above = height * 0.8, below = height * 0.2;
       for (const t of lineToks) {
+        // A raised or lowered run must stay clear of the lines above and below.
+        const shift = t.anchor || t.br ? 0 : baselineShift(t.style.baseline, t.size);
+        if (shift > 0) above = Math.max(above, shift + t.size * 0.92);
+        else if (shift < 0) below = Math.max(below, -shift + t.size * 0.25);
         const a = t.anchor;
         if (!a) continue;
         if (a.mode === 'inline') {
@@ -480,12 +490,17 @@ export function layoutStory(paras: Paragraph[], o: LayoutOptions): LayoutResult 
     const place = (last: boolean): 'ok' | 'moved' | 'overset' => {
       while (lineToks.length && lineToks[lineToks.length - 1].space) lineToks.pop();
       const g = lineGeom(first, lineNo);
-      let baseline = y + g.above;
+      // At the top of a box the first baseline sits at the font's ascent (or cap height) unless the frame
+      // asks for the full leading; the line's extra leading only separates it from the next line.
+      const atTop = Math.abs(y - box.y) < 0.01 && (box.firstBaseline ?? 'ascent') !== 'leading';
+      const lead = g.height * 0.8;
+      const top = box.firstBaseline === 'capHeight' ? g.maxSize * 0.7 : g.ascent;
+      let baseline = y + (atTop ? Math.max(top, g.above - lead + top) : g.above);
       if (st.gridAlign && o.grid && o.grid.step > 0) {
         const k = Math.ceil((baseline - o.grid.start) / o.grid.step);
         baseline = o.grid.start + Math.max(0, k) * o.grid.step;
       }
-      const bottom = baseline + Math.max(g.below, g.height * 0.25);
+      const bottom = baseline + (atTop ? Math.min(Math.max(g.below, g.height * 0.25), g.maxSize * 0.3) : Math.max(g.below, g.height * 0.25));
       // Footnotes referenced on this line: number them and lay out their text at the column width.
       const fnToks = lineToks.filter((t) => t.footnote);
       const target = fnTarget(bi);

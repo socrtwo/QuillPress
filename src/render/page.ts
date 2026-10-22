@@ -176,7 +176,7 @@ export function strokeAttrs(ctx: Ctx, line: Line | undefined): string {
     if (!kind || kind === 'none') continue;
     const id = `${ctx.prefix}m${ctx.defs.length}`;
     const shape = kind === 'oval' ? '<circle cx="5" cy="5" r="4"/>' : kind === 'diamond' ? '<path d="M5 0 L10 5 L5 10 L0 5 Z"/>' : kind === 'arrow' ? `<path d="M0 0 L10 5 L0 10" fill="none" stroke="${color}" stroke-width="1.5"/>` : kind === 'stealth' ? '<path d="M0 0 L10 5 L0 10 L3 5 Z"/>' : '<path d="M0 0 L10 5 L0 10 Z"/>';
-    ctx.defs.push(`<marker id="${id}" viewBox="0 0 10 10" refX="${end === 'tail' ? 8 : 2}" refY="5" markerWidth="${n(Math.max(3, 3 + w))}" markerHeight="${n(Math.max(3, 3 + w))}" orient="auto-start-reverse" fill="${color}">${shape}</marker>`);
+    ctx.defs.push(`<marker id="${id}" viewBox="0 0 10 10" refX="${end === 'tail' ? 8 : 2}" refY="5" markerWidth="3" markerHeight="3" orient="auto-start-reverse" fill="${color}">${shape}</marker>`);
     a += end === 'head' ? ` marker-start="url(#${id})"` : ` marker-end="url(#${id})"`;
   }
   return a;

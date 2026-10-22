@@ -273,8 +273,9 @@ export function arrowOps(kind: ArrowEnd | undefined, end: 'head' | 'tail', width
   const len = Math.hypot(at.dx, at.dy);
   if (!len) return '';
   const ca = at.dx / len, sa = at.dy / len;
-  // markerWidth is in stroke-width units; the marker's viewBox is 10 units wide.
-  const k = (Math.max(3, 3 + width) * width) / 10;
+  // As the renderer's marker: three line widths wide (markerWidth 3 in stroke-width units), its
+  // viewBox 10 units wide.
+  const k = (3 * width) / 10;
   const refX = end === 'tail' ? 8 : 2;
   const col = `${n(color[0])} ${n(color[1])} ${n(color[2])}`;
   const shape = kind === 'oval' ? `${col} rg 9 5 m 9 7.209 7.209 9 5 9 c 2.791 9 1 7.209 1 5 c 1 2.791 2.791 1 5 1 c 7.209 1 9 2.791 9 5 c h f`

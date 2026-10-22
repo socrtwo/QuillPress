@@ -194,6 +194,12 @@ function addLink(ctx: Ctx, x: number, y: number, w: number, h: number, uri: stri
   // Page coordinates (y down from the trim box) → PDF default space.
   const x0 = Math.min(...xs) + ctx.pad, x1 = Math.max(...xs) + ctx.pad;
   const y0 = ctx.H - ctx.pad - Math.max(...ys), y1 = ctx.H - ctx.pad - Math.min(...ys);
+  // The words of one link on one line become one annotation.
+  const last = ctx.links[ctx.links.length - 1];
+  if (last && last.uri === uri.trim() && Math.abs(last.rect[1] - y0) < 0.5 && Math.abs(last.rect[3] - y1) < 0.5 && x0 <= last.rect[2] + 1 && x1 >= last.rect[0] - 1) {
+    last.rect = [Math.min(last.rect[0], x0), y0, Math.max(last.rect[2], x1), y1];
+    return;
+  }
   ctx.links.push({ rect: [x0, y0, x1, y1], uri: uri.trim() });
 }
 
@@ -262,7 +268,7 @@ async function textOps(ctx: Ctx, text: string, family: string | undefined, bold:
   const stdOp = (t: string, sz: number) => {
     const f = fontKey(ctx, std);
     ctx.missing += winAnsiMisses(t);
-    ops.push(`BT ${fill} ${f} ${n(sz)} Tf${spc ? ` ${n(spc)} Tc` : ''} ${tm(cx)} ${pdfText(t)} Tj ET`);
+    ops.push(`BT ${fill} ${f} ${n(sz)} Tf ${n(spc)} Tc ${tm(cx)} ${pdfText(t)} Tj ET`);
     cx += textWidth(t, sz, std) + spc * [...t].length;
   };
   for (const ch of chunks) {
@@ -271,7 +277,7 @@ async function textOps(ctx: Ctx, text: string, family: string | undefined, bold:
       if ('hex' in piece) {
         const res = embeddedKey(ctx, piece.face);
         const synth = piece.face.synthBold ? ` 2 Tr ${n(piece.size / 30)} w ${n(r)} ${n(g)} ${n(b)} RG` : '';
-        ops.push(`BT ${fill} ${res} ${n(piece.size)} Tf${spc ? ` ${n(spc)} Tc` : ''}${synth} ${tm(cx, !!piece.face.synthItalic)} <${piece.hex}> Tj ET${synth ? ' 0 Tr' : ''}`);
+        ops.push(`BT ${fill} ${res} ${n(piece.size)} Tf ${n(spc)} Tc${synth} ${tm(cx, !!piece.face.synthItalic)} <${piece.hex}> Tj ET${synth ? ' 0 Tr' : ''}`);
         cx += piece.width;
       } else {
         stdOp(piece.fallback, piece.size);
@@ -281,13 +287,61 @@ async function textOps(ctx: Ctx, text: string, family: string | undefined, bold:
   return ops.join('\n');
 }
 
+/**
+ * Consecutive segments of one style as a single TJ string in one embedded face: each segment's glyphs,
+ * then the adjustment that moves the pen to the next segment's laid-out start. Null when the run needs
+ * more than that (characters from another face or a standard font, small capitals, standard fonts).
+ */
+async function groupOps(ctx: Ctx, l: LaidLine, segs: LaidLine['segs']): Promise<string | null> {
+  const s0 = segs[0], st = s0.style;
+  if (ctx.opts.embedFonts === false || st.caps === 'small') return null;
+  const face = await ctx.fontSet.face(s0.font, st.b, st.i);
+  if (!face) return null;
+  const spc = st.spc || 0;
+  const parts: string[] = [];
+  let pen = 0;
+  for (const s of segs) {
+    if (!s.text) continue;
+    const pieces = await ctx.fontSet.encodeAll(face, st.caps === 'all' ? s.text.toUpperCase() : s.text, s0.size, spc);
+    if (pieces.some((p) => !('hex' in p) || p.face !== face)) return null;
+    const target = s.x - s0.x;
+    if (Math.abs(target - pen) > 0.001) parts.push(n(((pen - target) * 1000) / s0.size));
+    for (const p of pieces) if ('hex' in p) { parts.push(`<${p.hex}>`); pen += p.width; }
+    pen = target + pieces.reduce((a, p) => a + p.width, 0);
+  }
+  if (!parts.length) return null;
+  const [r, g, b] = rgb(colorHex(ctx.pub.data, st.color));
+  const y = l.y - baselineShift(st.baseline, s0.size);
+  const res = embeddedKey(ctx, face);
+  const synth = face.synthBold ? ` 2 Tr ${n(s0.size / 30)} w ${n(r)} ${n(g)} ${n(b)} RG` : '';
+  const sk = face.synthItalic ? 0.2 : 0;
+  return `BT ${n(r)} ${n(g)} ${n(b)} rg ${res} ${n(s0.size)} Tf ${n(spc)} Tc${synth} 1 0 ${n(sk)} -1 ${n(l.x + s0.x)} ${n(y)} Tm [${parts.join(' ')}] TJ ET${synth ? ' 0 Tr' : ''}`;
+}
+
 /** Text of laid-out lines as PDF operators (coordinates of the current space, y down). */
 async function linesOps(ctx: Ctx, lines: LaidLine[]): Promise<string> {
   const d = ctx.pub.data;
   const out: string[] = [];
   for (const l of lines) {
     if (l.bullet) out.push(await textOps(ctx, l.bullet.text, l.bullet.font, false, false, l.bullet.size, l.bullet.x, l.y, rgb(colorHex(d, l.bullet.color)), 0, undefined));
-    for (const s of l.segs) {
+    // Runs of segments in one style (words and the spaces between them) go out as one TJ string with
+    // position adjustments, so every word sits where the layout put it and the space glyphs sit
+    // inside the string: poppler reads an Identity-H space glyph at a string boundary as a letter and
+    // runs the words together. Groups the TJ path cannot take are drawn segment by segment below.
+    const drawn = new Set<number>();
+    for (let i = 0; i < l.segs.length;) {
+      let j = i + 1;
+      const a = l.segs[i];
+      const key = (x: typeof a) => `${x.font}|${x.size}|${JSON.stringify(x.style)}`;
+      while (j < l.segs.length && !l.segs[j].drop && !l.segs[j].anchor && !l.segs[j].footnote && key(l.segs[j]) === key(a)) j++;
+      if (j - i > 1 && !a.drop && !a.anchor && !a.footnote) {
+        const ops = await groupOps(ctx, l, l.segs.slice(i, j));
+        if (ops) { out.push(ops); for (let k = i; k < j; k++) drawn.add(k); }
+      }
+      i = j;
+    }
+    for (let si = 0; si < l.segs.length; si++) {
+      const s = l.segs[si];
       if (!s.text) continue;
       const st = s.style;
       if (st.highlight) {
@@ -298,7 +352,7 @@ async function linesOps(ctx: Ctx, lines: LaidLine[]): Promise<string> {
       let y = l.y;
       if (s.drop) y = l.y + (s.drop - 1) * l.height;
       y -= baselineShift(st.baseline, s.size);
-      out.push(await textOps(ctx, s.text, s.font, st.b, st.i, s.size, l.x + s.x, y, color, st.spc || 0, st.caps));
+      if (!drawn.has(si)) out.push(await textOps(ctx, s.text, s.font, st.b, st.i, s.size, l.x + s.x, y, color, st.spc || 0, st.caps));
       if (st.u || st.strike) {
         const [r, g, b] = color;
         const yy = st.u ? y + s.size * 0.12 : y - s.size * 0.3;

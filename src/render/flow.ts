@@ -26,7 +26,7 @@ export function frameBoxes(frame: TextFrame, owner: { items: Item[] }, pageIndex
   const cw = (w - gutter * (cols - 1)) / cols;
   const excl = frame.ignoreWrap ? [] : wrapExclusions(frame, owner, pub);
   const out: FlowBox[] = [];
-  for (let c = 0; c < cols; c++) out.push({ frame: frame.id, col: c, x: x + c * (cw + gutter), y, w: cw, h, excl, page: pageIndex });
+  for (let c = 0; c < cols; c++) out.push({ frame: frame.id, col: c, x: x + c * (cw + gutter), y, w: cw, h, excl, page: pageIndex, ...(frame.firstBaseline ? { firstBaseline: frame.firstBaseline } : {}) });
   return out;
 }
 
