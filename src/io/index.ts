@@ -23,7 +23,7 @@ export const FORMATS: FormatDef[] = [
   { id: 'rtf', label: 'Rich Text', ext: ['rtf'], mime: 'application/rtf', canImport: true, canExport: false },
   { id: 'docx', label: 'Word Document', ext: ['docx'], mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', canImport: true, canExport: false },
   { id: 'html', label: 'Web Page', ext: ['html', 'htm'], mime: 'text/html', canImport: true, canExport: false },
-  { id: 'image', label: 'Picture', ext: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff'], mime: 'image/*', canImport: true, canExport: false },
+  { id: 'image', label: 'Picture', ext: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'wmf', 'emf'], mime: 'image/*', canImport: true, canExport: false },
   // Other page layout programs' formats (docs/FORMATS.md says how much of each is read).
   { id: 'idml', label: 'InDesign Markup (IDML)', ext: ['idml'], mime: IDML_MIME, canImport: true, canExport: true },
   { id: 'indd', label: 'InDesign Document', ext: ['indd', 'indt'], mime: 'application/x-indesign', canImport: true, canExport: false },
@@ -68,6 +68,8 @@ export function sniffFormat(data: Uint8Array, name: string): string | null {
     if (contains(data, 'word/document.xml') || contains(data, 'word/')) return 'docx';
     return byName;
   }
+  // Windows metafiles (placeable or plain WMF, EMF): opened as a picture through the metafile converter.
+  if (data.length >= 44 && ((data[0] === 0xd7 && data[1] === 0xcd && data[2] === 0xc6 && data[3] === 0x9a) || ((data[0] === 1 || data[0] === 2) && data[1] === 0 && data[2] === 9 && data[3] === 0 && data[5] === 3) || (data[0] === 1 && data[1] === 0 && data[2] === 0 && data[3] === 0 && ascii(data, 40, 44) === ' EMF'))) return 'image';
   if (head.startsWith('\x89PNG') || head.startsWith('\xff\xd8\xff') || head.startsWith('GIF8') || head.startsWith('BM') || head.startsWith('II*\x00') || head.startsWith('MM\x00*') || (head.startsWith('RIFF') && ascii(data, 8, 12) === 'WEBP')) return 'image';
   if (head.startsWith('{\\rtf')) return 'rtf';
   if (data[0] === 0x06 && data[1] === 0x06 && data[2] === 0xed && data[3] === 0xf5) return 'indd';

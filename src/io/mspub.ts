@@ -83,7 +83,7 @@ async function readLayout(st: PubStreams, name: string): Promise<LegacyImport> {
   if (!doc.pages.length) throw new Error('no pages');
   const r = collectPub(doc, name);
   r.warnings.push(st.version === '2000'
-    ? 'Publisher 2000 files describe fewer properties than later versions: fills are solid colors, pictures are metafiles (not placed), and no master pages are applied beyond the background page.'
+    ? 'Publisher 2000 files describe fewer properties than later versions: fills are solid colors, pictures are Windows metafiles (converted to vector drawings), and no master pages are applied beyond the background page.'
     : 'Publisher 97/98 files were read as far as the format is known: shapes, solid fills, outlines and plain text with bold, italic, underline, size and color.');
   return { pub: r.pub, warnings: r.warnings, textOnly: false };
 }

@@ -143,7 +143,11 @@ async function rasterize(mime: string, bytes: Uint8Array, maxPx: number, quality
     const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
     const img = await new Promise<HTMLImageElement>((res, rej) => { const im = new Image(); const t = setTimeout(() => rej(new Error('timeout')), 15000); im.onload = () => { clearTimeout(t); res(im); }; im.onerror = () => { clearTimeout(t); rej(new Error('decode')); }; im.src = url; });
     URL.revokeObjectURL(url);
-    const k = Math.min(1, maxPx / Math.max(1, img.naturalWidth || img.width, img.naturalHeight || img.height));
+    // Vector pictures (SVG, converted metafiles) have no pixels of their own: draw them at about 300 dpi
+    // of their natural size (capped by maxPx) and keep them lossless, since line art suffers in JPEG.
+    const vector = mime === 'image/svg+xml';
+    const long = Math.max(1, img.naturalWidth || img.width, img.naturalHeight || img.height);
+    const k = vector ? Math.min(maxPx / long, 300 / 72) : Math.min(1, maxPx / long);
     const w = Math.max(1, Math.round((img.naturalWidth || img.width || 300) * k)), h = Math.max(1, Math.round((img.naturalHeight || img.height || 150) * k));
     const c = document.createElement('canvas');
     c.width = w; c.height = h;
@@ -154,7 +158,7 @@ async function rasterize(mime: string, bytes: Uint8Array, maxPx: number, quality
     const data = g.getImageData(0, 0, w, h).data;
     let hasAlpha = false;
     for (let i = 3; i < data.length; i += 4) if (data[i] < 250) { hasAlpha = true; break; }
-    if (!hasAlpha) {
+    if (!hasAlpha && !vector) {
       const dataUrl = c.toDataURL('image/jpeg', quality);
       return { w, h, jpeg: unb64(dataUrl.split(',')[1]) };
     }

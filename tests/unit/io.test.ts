@@ -52,6 +52,10 @@ describe('formats table', () => {
     expect(sniffFormat(qpp, 'anything.bin')).toBe('qpp');
     expect(sniffFormat(new TextEncoder().encode('<?xml version="1.0"?><SCRIBUSUTF8NEW Version="1.5.8"><DOCUMENT/></SCRIBUSUTF8NEW>'), 'a.xml')).toBe('sla');
     expect(sniffFormat(new TextEncoder().encode('{"format":"quillpress"}'), 'a.txt')).toBe('json');
+    const wmf = new Uint8Array(64); wmf.set([0xd7, 0xcd, 0xc6, 0x9a]);
+    expect(sniffFormat(wmf, 'clip.bin')).toBe('image');
+    const emf = new Uint8Array(64); emf[0] = 1; emf.set([0x20, 0x45, 0x4d, 0x46], 40);
+    expect(sniffFormat(emf, 'x')).toBe('image');
   });
 });
 
