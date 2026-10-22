@@ -6,9 +6,10 @@ import { Pub, newId } from '../model/pub';
 import type { MediaItem, PictureFrame } from '../model/types';
 import { b64 } from './xml';
 import { tiffToBmp } from './tiff';
+import { isMetafile, metafileToSvg } from './metafile/index';
 
-export const IMAGE_ACCEPT = '.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.tif,.tiff';
-export const IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml', 'image/tiff'];
+export const IMAGE_ACCEPT = '.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.tif,.tiff,.wmf,.emf';
+export const IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml', 'image/tiff', 'image/wmf', 'image/x-wmf', 'image/emf', 'image/x-emf'];
 
 export function mimeOf(name: string, data?: Uint8Array): string {
   if (data) {
@@ -19,10 +20,11 @@ export function mimeOf(name: string, data?: Uint8Array): string {
     if (h.startsWith('BM')) return 'image/bmp';
     if (h.startsWith('II*\x00') || h.startsWith('MM\x00*')) return 'image/tiff';
     if (h.startsWith('RIFF')) return 'image/webp';
+    if (isMetafile(data)) return data[0] === 1 && data[40] === 0x20 ? 'image/emf' : 'image/wmf';
     if (/^\s*</.test(new TextDecoder().decode(data.subarray(0, 64)))) return 'image/svg+xml';
   }
   const ext = name.split('.').pop()?.toLowerCase() || '';
-  return { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml', tif: 'image/tiff', tiff: 'image/tiff' }[ext] || 'application/octet-stream';
+  return { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml', tif: 'image/tiff', tiff: 'image/tiff', wmf: 'image/wmf', emf: 'image/emf' }[ext] || 'application/octet-stream';
 }
 
 /** Natural size of a picture in pixels (SVG: its viewBox or width/height; 0 when unknown). */
@@ -77,6 +79,12 @@ export function headerSize(mime: string, d: Uint8Array): { w: number; h: number 
 export async function mediaFromBytes(data: Uint8Array, name: string): Promise<MediaItem> {
   let mime = mimeOf(name, data);
   let bytes = data;
+  if (mime === 'image/wmf' || mime === 'image/emf') {
+    // Windows metafiles are drawn as SVG: the browser cannot show them, and the drawing stays vector.
+    const svg = metafileToSvg(data);
+    if (!svg) throw new Error('This Windows metafile draws nothing QuillPress can show (it may be empty or damaged).');
+    return { mime: 'image/svg+xml', b64: b64(new TextEncoder().encode(svg.svg)), name: name.replace(/\.(wmf|emf)$/i, '.svg'), w: Math.round(svg.w * 100) / 100, h: Math.round(svg.h * 100) / 100 };
+  }
   if (mime === 'image/tiff') {
     const bmp = tiffToBmp(data);
     if (!bmp) throw new Error('This TIFF uses a compression or color mode QuillPress cannot read yet.');

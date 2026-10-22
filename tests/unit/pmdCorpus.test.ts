@@ -200,4 +200,77 @@ describe.skipIf(!existsSync(SAMPLES))('PageMaker real files', () => {
       expect(r.warnings[0], name).toMatch(/^PageMaker publication/);
     }
   });
+
+  it('reads Mac colour records (16-bit RGB and CMYK) and every character attribute of the 6.0 sample', async () => {
+    const r = await importPageMaker(load('text-format.6'), 'text-format.6');
+    const runs = r.pub.data.stories.flatMap((s) => s.paras.flatMap((p) => p.runs)).filter((x) => x.text);
+    const run = (t: string) => runs.find((x) => x.text.replace(/\u00a0/g, ' ').startsWith(t))!;
+    expect(run('outline').outline).toBe(true);
+    expect(run('shadow').tshadow).toBe(true);
+    expect(run('reverse').color).toBe('#ffffff');
+    expect(run('blue color').color).toBe('#0000ff');
+    expect(run('horiz. scale').hscale).toBe(90);
+    expect(run('baseline shifr 5').shift).toBe(5);
+    expect(run('baseline shifr 2').shift).toBe(-2);
+    expect(run('loose tracking').spc).toBeCloseTo(0.04 * 12, 2);
+    expect(run('line end: no break').text).toContain('\u00a0');
+    expect(run('line end: no break').text).not.toContain(' ');
+  });
+
+  it('skews boxes about their centre, centred on the skewed bounding box', async () => {
+    const r = await importPageMaker(load('rect_skew.pmd'), 'rect_skew.pmd');
+    const s = flat(r.pub.data.pages[0].items).find((i) => i.kind === 'shape') as ShapeItem;
+    expect(s.skew).toBe(30);
+    expect(s.rot).toBeUndefined();
+    // Unskewed 4905 × 2216 twips; the skewed outline spans x 3218..9402 around the spine (x = 0).
+    expect(s.w).toBeCloseTo(4905 / 20, 1);
+    expect(s.x + s.w / 2).toBeCloseTo((3218 + 9402) / 40, 1);
+    const e = flat((await importPageMaker(load('ellipse_skew.pmd'), 'ellipse_skew.pmd')).pub.data.pages[0].items).find((i) => i.kind === 'shape') as ShapeItem;
+    expect(e.skew).toBe(20);
+    expect(r.warnings.join(' ')).not.toMatch(/skew is ignored/);
+  });
+
+  it('finds the master page records (left and right "Document Master", empty in every sample)', async () => {
+    const { readMasters } = await import('../../src/io/pagemaker/shapes');
+    const { readXforms } = await import('../../src/io/pagemaker/records');
+    for (const name of ['A4doc.pmd', 'double_sided_multi_page.pmd', 'shapes.6', 'sub_records.pmd']) {
+      const f = openPageMaker(load(name));
+      const m = readMasters(f, readXforms(f), []);
+      expect(m.map((x) => `${x.name}/${x.side}`), name).toEqual(['Document Master/left', 'Document Master/right']);
+      expect(m.every((x) => x.shapes.length === 0), name).toBe(true);
+    }
+  });
+});
+
+describe('PageMaker master pages', () => {
+  it('imports the objects of a master page record and applies the master by side', async () => {
+    const { readMasters } = await import('../../src/io/pagemaker/shapes');
+    // A minimal little-endian record store: a master container (type 0x2f, two 508-byte records) and
+    // a shape container (type 0x19) holding one rectangle under the right master's sequence number.
+    const bytes = new Uint8Array(4096);
+    const dv = new DataView(bytes.buffer);
+    const name = 'A-Master';
+    for (let side = 0; side < 2; side++) {
+      const o = 64 + side * 508;
+      for (let k = 0; k < name.length; k++) bytes[o + k] = name.charCodeAt(k);
+      dv.setUint16(o + 34, side === 0 ? 2 : 3, true);
+      dv.setUint16(o + 38, side === 0 ? 18 : 19, true);
+    }
+    const rect = 2048;
+    bytes[rect] = 0x04;
+    dv.setInt16(rect + 6, -1440, true); dv.setInt16(rect + 8, -720, true); dv.setInt16(rect + 10, 1440, true); dv.setInt16(rect + 12, 720, true);
+    dv.setUint32(rect + 34, 5 * 256, true);
+    const file = {
+      bytes, be: false, encoding: 'windows-1252' as const, v60: false,
+      records: [{ type: 0x2f, offset: 64, seq: 17, count: 2 }, { type: 0x19, offset: rect, seq: 19, count: 1 }],
+      byType: new Map([[0x2f, [{ type: 0x2f, offset: 64, seq: 17, count: 2 }]], [0x19, [{ type: 0x19, offset: rect, seq: 19, count: 1 }]]]),
+    };
+    const m = readMasters(file as any, new Map(), []);
+    expect(m).toHaveLength(2);
+    expect(m[0]).toMatchObject({ name: 'A-Master', side: 'left' });
+    expect(m[0].shapes).toHaveLength(0);
+    expect(m[1].side).toBe('right');
+    expect(m[1].shapes.map((s) => s.kind)).toEqual(['rect']);
+    expect(m[1].shapes[0].tl).toEqual({ x: -1440, y: -720 });
+  });
 });

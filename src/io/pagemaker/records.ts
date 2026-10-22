@@ -15,7 +15,7 @@ import { openCfb } from '../cfb';
 
 export const REC = {
   FONTS_PARENT: 0x01, PAGE: 0x05, PARA: 0x0b, TIFF: 0x0e, LINE_SET: 0x11, FONTS: 0x13, COLORS: 0x15,
-  GLOBAL_INFO: 0x18, SHAPE: 0x19, TEXT_BLOCK: 0x1a, CHARS: 0x1c, XFORM: 0x28,
+  GLOBAL_INFO: 0x18, SHAPE: 0x19, TEXT_BLOCK: 0x1a, CHARS: 0x1c, XFORM: 0x28, MASTER: 0x2f,
 } as const;
 
 /**
@@ -195,8 +195,11 @@ export function readColors(file: PmFile): string[] {
         r.skip(0x22);
         const model = r.u8();
         r.skip(3);
+        // Windows files: 0x18 RGB (8-bit channels), 0x08 CMYK (16-bit). Mac files store the same flags
+        // one bit lower: 0x0c RGB with 16-bit channels, 0x04 CMYK.
         if (model === 0x18) rgb = [r.u8(), r.u8(), r.u8()];
-        else if (model === 0x08 || model === 0x10) {
+        else if (model === 0x0c) rgb = [r.u16() / 257, r.u16() / 257, r.u16() / 257];
+        else if (model === 0x08 || model === 0x10 || model === 0x04) {
           const c = r.u16() / 65535, m = r.u16() / 65535, y = r.u16() / 65535, k = r.u16() / 65535;
           rgb = [255 * (1 - Math.min(1, c + k)), 255 * (1 - Math.min(1, m + k)), 255 * (1 - Math.min(1, y + k))];
         }

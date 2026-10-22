@@ -55,32 +55,69 @@ export function readPages(file: PmFile, xforms: Map<number, PmXform>, warnings: 
     const r = recordAt(file, rec, i);
     r.skip(2);
     const shapesSeq = r.u16();
-    const page: PmPage = { shapes: [] };
-    // Open groups collect the shapes that follow until their closing marker.
-    const stack: PmShape[] = [];
-    const sink = () => (stack.length ? stack[stack.length - 1].children! : page.shapes);
-    for (const c of withSeq(file, shapesSeq)) {
-      if (c.type !== REC.SHAPE) continue;
-      for (let k = 0; k < c.count; k++) {
-        try {
-          const s = readShape(file, c, k, xforms);
-          if (!s) continue;
-          if ('marker' in s) {
-            if (s.marker === 'open') stack.push({ kind: 'group', tl: s.tl, br: s.br, xform: IDENTITY, children: [] });
-            else if (stack.length) { const g = stack.pop()!; if (g.children!.length) sink().push(g); }
-            continue;
-          }
-          sink().push(s);
-        } catch (e) {
-          warnings.push(`An object on page ${i + 1} could not be read (${(e as Error).message}).`);
-        }
-      }
-    }
-    // A group left open by a damaged file keeps its members as plain shapes.
-    while (stack.length) { const g = stack.pop()!; sink().push(...g.children!); }
-    pages.push(page);
+    pages.push({ shapes: readShapeList(file, shapesSeq, xforms, warnings, `page ${i + 1}`) });
   }
   return pages;
+}
+
+/** The shapes listed under one sequence number, with groups built from their open/close markers. */
+function readShapeList(file: PmFile, shapesSeq: number, xforms: Map<number, PmXform>, warnings: string[], where: string): PmShape[] {
+  const shapes: PmShape[] = [];
+  // Open groups collect the shapes that follow until their closing marker.
+  const stack: PmShape[] = [];
+  const sink = () => (stack.length ? stack[stack.length - 1].children! : shapes);
+  for (const c of withSeq(file, shapesSeq)) {
+    if (c.type !== REC.SHAPE) continue;
+    for (let k = 0; k < c.count; k++) {
+      try {
+        const s = readShape(file, c, k, xforms);
+        if (!s) continue;
+        if ('marker' in s) {
+          if (s.marker === 'open') stack.push({ kind: 'group', tl: s.tl, br: s.br, xform: IDENTITY, children: [] });
+          else if (stack.length) { const g = stack.pop()!; if (g.children!.length) sink().push(g); }
+          continue;
+        }
+        sink().push(s);
+      } catch (e) {
+        warnings.push(`An object on ${where} could not be read (${(e as Error).message}).`);
+      }
+    }
+  }
+  // A group left open by a damaged file keeps its members as plain shapes.
+  while (stack.length) { const g = stack.pop()!; sink().push(...g.children!); }
+  return shapes;
+}
+
+export interface PmMaster { name: string; side: 'left' | 'right'; shapes: PmShape[] }
+
+/** Size of a master page record (type 0x2f). */
+const MASTER_RECORD = 508;
+
+/**
+ * Master pages. Each master has two 508-byte records of type 0x2f, its left and its right page: a
+ * 32-byte name, then a page record of the same shape as a document page's from byte 34 (34: page
+ * id, 2 for the left and 3 for the right side; 38: the sequence number of the side's shape list,
+ * numbered just before the first document page's). Not in libpagemaker; read from the files
+ * themselves, where every master in the sample set is the empty "Document Master".
+ */
+export function readMasters(file: PmFile, xforms: Map<number, PmXform>, warnings: string[]): PmMaster[] {
+  const out: PmMaster[] = [];
+  for (const rec of file.byType.get(REC.MASTER) || []) {
+    for (let i = 0; i < rec.count; i++) {
+      const o = rec.offset + MASTER_RECORD * i;
+      if (o + 40 > file.bytes.length) break;
+      let name = '';
+      for (let k = 0; k < 32 && file.bytes[o + k]; k++) name += String.fromCharCode(file.bytes[o + k]);
+      const r = recordAt(file, rec, 0);
+      r.seek(o + 34);
+      const id = r.u16();
+      r.seek(o + 38);
+      const seq = r.u16();
+      const shapes = readShapeList(file, seq, xforms, warnings, `master page ${name || i + 1}`);
+      out.push({ name: name.trim() || 'Master', side: id === 2 ? 'left' : 'right', shapes });
+    }
+  }
+  return out;
 }
 
 function xformOf(xforms: Map<number, PmXform>, id: number): PmXform {

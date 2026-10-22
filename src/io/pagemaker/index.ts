@@ -12,7 +12,7 @@ import type { Page, Item, TextFrame, PictureFrame, ShapeItem, LineItem, GroupIte
 import { harvestLayout, type LegacyImport } from '../legacyLayout';
 import { mediaFromBytes } from '../images';
 import { openPageMaker, readXforms, readFonts, readColors, readGlobalInfo, UNITS_PER_POINT, type PmFile, type Pt } from './records';
-import { readPages, type PmShape, type PmStroke, type PmFill } from './shapes';
+import { readPages, readMasters, type PmShape, type PmStroke, type PmFill } from './shapes';
 import { textParagraphs, tinted, type TextEnv } from './text';
 
 /** Imports a PageMaker publication; falls back to the text harvest when the layout cannot be read. */
@@ -60,8 +60,30 @@ async function readLayout(file: PmFile, name: string): Promise<LegacyImport> {
       if (x0 < 0 && i > 0 && (x1 < 0 || s.kind !== 'text')) placed[i - 1].push({ shape: s, origin: { x: global.pageW, y: halfH } });
     }
   }
+  // Master pages: imported only when they hold objects (every master in the sample set is empty).
+  // A single-sided publication uses the right-hand master; a double-sided one gets a left and a right
+  // master, placed like the pages of a spread around the spine.
+  const pmMasters = readMasters(file, xforms, warnings).filter((m) => m.shapes.length);
+  const masterFor: { left?: string; right?: string } = {};
+  if (pmMasters.length) {
+    const used = global.doubleSided ? pmMasters : pmMasters.filter((m) => m.side === 'right').slice(0, 1);
+    for (const m of used) {
+      const qm = { ...master, id: newId('mst'), name: global.doubleSided ? `${m.name} (${m.side})` : m.name, side: (global.doubleSided ? m.side : 'single') as 'left' | 'right' | 'single', items: [] as Item[] };
+      const origin: Pt = !global.doubleSided ? { x: halfW, y: halfH } : m.side === 'left' ? { x: global.pageW, y: halfH } : { x: 0, y: halfH };
+      for (const shape of m.shapes) {
+        try { const item = await toItem(ctx, shape, origin); if (item) qm.items.push(item); } catch (e) { warnings.push(`An object on the master page "${m.name}" was skipped (${(e as Error).message}).`); }
+      }
+      if (!qm.items.length) continue;
+      pub.data.masters.push(qm);
+      masterFor[m.side] = qm.id;
+      ctx.counts.masterItems = (ctx.counts.masterItems || 0) + qm.items.length;
+    }
+    if (ctx.counts.masterItems) warnings.push(`${ctx.counts.masterItems} master page object${ctx.counts.masterItems === 1 ? ' was' : 's were'} imported; the master records were identified from the file layout, and their placement has not been checked against a file whose masters hold objects.`);
+  }
   for (let i = 0; i < pmPages.length; i++) {
-    const page: Page = { id: newId('pg'), master: master.id, items: [] };
+    // The first page of a double-sided publication is a right-hand page.
+    const side = global.doubleSided ? (i % 2 === 0 ? 'right' : 'left') : 'right';
+    const page: Page = { id: newId('pg'), master: masterFor[side] || masterFor.right || master.id, items: [] };
     for (const { shape, origin } of placed[i]) {
       try {
         const item = await toItem(ctx, shape, origin);
@@ -101,10 +123,20 @@ function fillOf(ctx: Ctx, f: PmFill | undefined): Fill {
 }
 
 /** Box, rotation and position of a shape in page points. */
-function boxOf(s: PmShape, origin: Pt): { x: number; y: number; w: number; h: number; rot?: number } {
+function boxOf(s: PmShape, origin: Pt): { x: number; y: number; w: number; h: number; rot?: number; skew?: number } {
   const x0 = Math.min(s.tl.x, s.br.x), y0 = Math.min(s.tl.y, s.br.y);
   const w = Math.abs(s.br.x - s.tl.x), h = Math.abs(s.br.y - s.tl.y);
   if (!s.xform.rotation && !s.xform.skew) return { x: r2(pt(x0 + origin.x)), y: r2(pt(y0 + origin.y)), w: r2(pt(w)), h: r2(pt(h)) };
+  if (s.xform.skew) {
+    // Skewed (and possibly rotated): the transform record holds the untransformed box; the shape
+    // record's box bounds the transformed outline, which is symmetric about the shape's centre, so
+    // the item is that box centred on the bounding box. PageMaker's positive skew leans the top edge
+    // to the right (the pivot is the top-left corner of the leaning top edge), as the item's skew does.
+    const bw = Math.abs(s.xform.botRight.x - s.xform.topLeft.x) || w, bh = Math.abs(s.xform.botRight.y - s.xform.topLeft.y) || h;
+    const cx = x0 + w / 2 + origin.x, cy = y0 + h / 2 + origin.y;
+    const deg = -s.xform.rotation;
+    return { x: r2(pt(cx - bw / 2)), y: r2(pt(cy - bh / 2)), w: r2(pt(bw)), h: r2(pt(bh)), ...(deg ? { rot: r2(deg) } : {}), skew: r2(s.xform.skew) };
+  }
   // Rotated: the transform record holds the unrotated box and the pivot; the box turns about the
   // pivot (its top-left corner), counter-clockwise for positive angles.
   const bw = Math.abs(s.xform.botRight.x - s.xform.topLeft.x) || w, bh = Math.abs(s.xform.botRight.y - s.xform.topLeft.y) || h;
@@ -118,7 +150,7 @@ function boxOf(s: PmShape, origin: Pt): { x: number; y: number; w: number; h: nu
 async function toItem(ctx: Ctx, s: PmShape, origin: Pt): Promise<Item | null> {
   const count = (k: string) => { ctx.counts[k] = (ctx.counts[k] || 0) + 1; };
   const box = boxOf(s, origin);
-  const base = { x: box.x, y: box.y, w: box.w, h: box.h, ...(box.rot ? { rot: box.rot } : {}) };
+  const base = { x: box.x, y: box.y, w: box.w, h: box.h, ...(box.rot ? { rot: box.rot } : {}), ...(box.skew ? { skew: box.skew } : {}) };
   switch (s.kind) {
     case 'line': {
       count('lines');
@@ -184,7 +216,7 @@ function summarize(ctx: Ctx, name: string): void {
   const add = (n: number | undefined, one: string, many: string) => { if (n) parts.push(`${n} ${n === 1 ? one : many}`); };
   add(c.textBlocks, 'text block', 'text blocks'); add(c.pictures, 'picture', 'pictures'); add(c.lines, 'line', 'lines'); add(c.shapes, 'shape', 'shapes'); add(c.groups, 'group', 'groups');
   const pages = ctx.pub.pages.length;
-  ctx.warnings.unshift(`PageMaker publication "${name}": ${pages} page${pages === 1 ? '' : 's'} read with ${parts.length ? parts.join(', ') : 'no objects'}. Text blocks are independent frames (PageMaker threads are not kept); master page items could not be identified in the file and were not imported; skew is ignored.`);
+  ctx.warnings.unshift(`PageMaker publication "${name}": ${pages} page${pages === 1 ? '' : 's'} read with ${parts.length ? parts.join(', ') : 'no objects'}. Text blocks are independent frames (PageMaker threads are not kept); master pages are imported when they hold objects.`);
   if (ctx.missingPictures) ctx.warnings.push(`${ctx.missingPictures} placed picture${ctx.missingPictures === 1 ? '' : 's'} could not be decoded (PageMaker keeps a TIFF copy in the file; compressed or unusual TIFFs are not readable yet). Place the original picture files again.`);
   if (ctx.nonPrinting) ctx.warnings.push(`${ctx.nonPrinting} object${ctx.nonPrinting === 1 ? ' is' : 's are'} marked non-printing in PageMaker (template instructions, fold lines); ${ctx.nonPrinting === 1 ? 'it is' : 'they are'} on the layer "Non-printing (PageMaker)": hide that layer before printing or exporting.`);
   if (ctx.metafiles) ctx.warnings.push(`${ctx.metafiles} placed Windows metafile${ctx.metafiles === 1 ? ' was' : 's were'} left as empty picture frames.`);

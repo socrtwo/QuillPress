@@ -266,12 +266,33 @@ describe.skipIf(!has)('QuarkXPress corpus', () => {
     expect(lines.filter((l) => !l.line?.dash).length).toBeGreaterThanOrEqual(3);
   });
 
-  it('baseline shifts are not turned into subscripts', async () => {
+  it('baseline shifts keep the size and become a shift in points (a fraction of the type size)', async () => {
     const r = await load('char-format1.qxd');
     const runs = r.pub.data.stories.flatMap((s) => s.paras.flatMap((p) => p.runs)).filter((x) => x.text);
     expect(runs.map((x) => x.text).join('')).toBe('ab');
     expect(runs.every((x) => x.baseline === undefined)).toBe(true);
-    expect(r.warnings.some((w) => /baseline shift/.test(w))).toBe(true);
+    // -0.4167 of 12 pt and of 10 pt.
+    expect(runs.map((x) => x.shift).sort()).toEqual([-4.17, -5]);
+    const fp = await load('font-props.qxd');
+    const shifted = fp.pub.data.stories.flatMap((s) => s.paras.flatMap((p) => p.runs)).find((x) => x.text.includes('baseline shift'))!;
+    expect(shifted.shift).toBe(8);
+    expect(r.warnings.some((w) => /baseline shift/.test(w))).toBe(false);
+  });
+
+  it('reads horizontal scale, tracking, kerning, outline and shadow type', async () => {
+    const runsOf = async (n: string) => (await load(n)).pub.data.stories.flatMap((s) => s.paras.flatMap((p) => p.runs)).filter((x) => x.text);
+    const fin = await runsOf('FINCOLOR-4.qxd');
+    const intl = fin.find((x) => x.text === 'INTERNATIONAL')!;
+    expect(intl.hscale).toBe(79);
+    expect(intl.spc).toBeCloseTo((18 / 200) * 45, 1);
+    const bike = fin.find((x) => x.text.startsWith('B i c y c l e'))!;
+    expect(bike.hscale).toBe(60);
+    expect(bike.spc).toBeCloseTo((72 / 200) * 32, 1);
+    const kern = await runsOf('kern-33.qxd');
+    expect(kern.find((x) => x.spc)?.spc).toBeCloseTo((20 / 200) * 12, 2);
+    const fmt = await runsOf('4.0_win-formatting.qxd');
+    expect(fmt.find((x) => x.text.includes('outline'))?.outline).toBe(true);
+    expect(fmt.find((x) => x.text.includes('shadow'))?.tshadow).toBe(true);
   });
 
   it('group members carry page coordinates inside their group, also across the spine of a spread', async () => {

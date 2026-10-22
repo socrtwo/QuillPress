@@ -6,6 +6,8 @@
 import { Pub, newId } from '../../model/pub';
 import type { Item, TextFrame, PictureFrame, ShapeItem, LineItem, GroupItem, TableItem, TableCell, Paragraph, Master, Page, Fill, Line, Story } from '../../model/types';
 import { b64 } from '../xml';
+import { immortalInflate } from '../recover/inflate';
+import { metafileToSvg } from '../metafile/index';
 import type { LDoc, LShape, LPage } from './shapes';
 import { storyParagraphs, hex, type TextEnv } from './text';
 import type { QPara } from './quill';
@@ -38,7 +40,7 @@ interface Env {
   /** Text frames by Quill text id, in placement order (for chains). */
   frames: Map<number, TextFrame[]>;
   stories: Map<number, Story>;
-  counts: { unknownShapes: number; metafiles: number; emptyBoxes: number; approxShapes: number; tableBorders: number };
+  counts: { unknownShapes: number; metafiles: number; emptyBoxes: number; approxShapes: number; tableBorders: number; convertedMetafiles?: number };
 }
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
@@ -64,7 +66,20 @@ function mediaOf(env: Env, n: number): string | undefined {
   if (env.media.has(n)) return env.media.get(n);
   const pic = env.doc.pictures[n - 1];
   if (!pic || !pic.data.length) return undefined;
-  if (pic.kind === 'wmf' || pic.kind === 'emf' || pic.kind === 'pict' || pic.kind === 'unknown') { env.skippedPictures.add(n); env.counts.metafiles++; return undefined; }
+  if (pic.kind === 'wmf' || pic.kind === 'emf') {
+    // Windows metafiles become SVG drawings (deflated in the delay stream; raw in Publisher 2000 files).
+    let svg: ReturnType<typeof metafileToSvg> = null;
+    try {
+      const raw = pic.meta?.compressed ? immortalInflate(pic.data).data : pic.data;
+      svg = metafileToSvg(raw, pic.meta ? { bounds: pic.meta.bounds, sizePt: pic.meta.sizePt.w > 0 && pic.meta.sizePt.h > 0 ? pic.meta.sizePt : undefined } : {});
+    } catch { svg = null; }
+    if (!svg) { env.skippedPictures.add(n); env.counts.metafiles++; return undefined; }
+    const id = env.pub.addMedia({ mime: 'image/svg+xml', b64: b64(new TextEncoder().encode(svg.svg)), name: `picture-${n}.svg`, w: Math.round(svg.w * 100) / 100, h: Math.round(svg.h * 100) / 100 });
+    env.media.set(n, id);
+    env.counts.convertedMetafiles = (env.counts.convertedMetafiles || 0) + 1;
+    return id;
+  }
+  if (pic.kind === 'pict' || pic.kind === 'unknown') { env.skippedPictures.add(n); env.counts.metafiles++; return undefined; }
   const id = env.pub.addMedia({ mime: pic.mime, b64: b64(pic.data), name: `picture-${n}.${pic.kind === 'jpeg' ? 'jpg' : pic.kind === 'dib' ? 'bmp' : pic.kind}` });
   env.media.set(n, id);
   return id;
@@ -261,7 +276,8 @@ export function collectPub(doc: LDoc, name: string): CollectResult {
   const w: string[] = [...doc.warnings];
   const items = P.pages.reduce((a, p) => a + p.items.length, 0) + P.masters.reduce((a, m) => a + m.items.length, 0);
   w.unshift(`Microsoft Publisher ${doc.version}: ${P.pages.length} page${P.pages.length === 1 ? '' : 's'}${masters.length ? ` and ${masters.length} master page${masters.length === 1 ? '' : 's'}` : ''} with ${items} object${items === 1 ? '' : 's'} and ${P.stories.length} stor${P.stories.length === 1 ? 'y' : 'ies'} were read with their layout.`);
-  if (env.counts.metafiles) w.push(`${env.counts.metafiles} picture${env.counts.metafiles === 1 ? ' is a Windows metafile (WMF/EMF) and was' : 's are Windows metafiles (WMF/EMF) and were'} left as empty frames; convert them to PNG and place them again.`);
+  if (env.counts.metafiles) w.push(`${env.counts.metafiles} picture${env.counts.metafiles === 1 ? ' is a metafile that could not be converted (an empty or damaged WMF/EMF, or a Macintosh PICT) and was' : 's are metafiles that could not be converted (empty or damaged WMF/EMF, or Macintosh PICT) and were'} left as empty frames; place them again from another format.`);
+  if (env.counts.convertedMetafiles) w.push(`${env.counts.convertedMetafiles} Windows metafile picture${env.counts.convertedMetafiles === 1 ? ' was' : 's were'} converted to SVG drawings; text in them uses the fonts installed on this device.`);
   if (env.counts.approxShapes) w.push(`${env.counts.approxShapes} shape${env.counts.approxShapes === 1 ? ' was' : 's were'} drawn with the closest preset QuillPress has (curved arrows, callouts and flowchart symbols are approximate).`);
   if (doc.counts.wordArt) w.push(`${doc.counts.wordArt} WordArt object${doc.counts.wordArt === 1 ? ' was' : 's were'} placed as plain text in its colour; the warp, outline and shadow effects are not reproduced.`);
   if (env.counts.tableBorders) w.push(`${env.counts.tableBorders} table${env.counts.tableBorders === 1 ? '' : 's'} from Publisher 2000 got a plain hairline grid; its cell borders and fills are not read.`);

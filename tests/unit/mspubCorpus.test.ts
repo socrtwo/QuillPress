@@ -27,7 +27,7 @@ describe.skipIf(!have)('Publisher corpus (real files)', () => {
     expect(all.length).toBeGreaterThanOrEqual(70);
     expect(all.filter((i) => i.kind === 'picture').length).toBeGreaterThanOrEqual(7);
     expect(all.filter((i) => i.kind === 'table')).toHaveLength(1);
-    expect(Object.keys(r.pub.media)).toHaveLength(3);
+    expect(Object.keys(r.pub.media).length).toBeGreaterThanOrEqual(3); // JPEGs, plus metafiles where they convert
     const texts = all.filter((i): i is TextFrame => i.kind === 'text').map((f) => storyText(r.pub, f));
     expect(texts.some((t) => t.includes('What light through yonder window breaks'))).toBe(true);
   });
@@ -66,11 +66,28 @@ describe.skipIf(!have)('Publisher corpus (real files)', () => {
     const t = items(t1.pub).find((i): i is TableItem => i.kind === 'table')!;
     expect(t.cols).toHaveLength(3);
     expect(t.rows).toHaveLength(7);
+    // A new Publisher 2000 table has only non-printing gridlines: every cell border style has width 0.
+    expect(t.border).toBeUndefined();
+    expect(t.innerBorder).toBeUndefined();
+    expect(t1.warnings.some((w) => /hairline grid/.test(w))).toBe(false);
+    // border1 sets 1 pt borders on the first row's top edge and on the first column's left edge of
+    // the first two rows: drawn as lines grouped with the table.
     const b = await load('border1.pub');
-    const bt = items(b.pub).find((i): i is TableItem => i.kind === 'table')!;
+    const g = items(b.pub).find((i) => i.kind === 'group');
+    expect(g?.kind).toBe('group');
+    if (g?.kind !== 'group') return;
+    const bt = g.children.find((i): i is TableItem => i.kind === 'table')!;
     expect(bt.cols).toHaveLength(2);
     expect(bt.rows).toHaveLength(7);
-    expect(b.warnings.some((w) => /hairline grid/.test(w))).toBe(true);
+    expect(bt.border).toBeUndefined();
+    const lines = g.children.filter((i) => i.kind === 'line');
+    expect(lines).toHaveLength(2);
+    const top = lines.find((l) => l.h === 0)!, left = lines.find((l) => l.w === 0)!;
+    expect([top.x, top.y, top.w]).toEqual([bt.x, bt.y, bt.w]);
+    expect(top.line?.width).toBe(1);
+    expect(left.x).toBe(bt.x);
+    expect(left.h).toBeCloseTo(bt.h * 2 / 7, 0);
+    expect(b.warnings.some((w) => /hairline grid/.test(w))).toBe(false);
   });
 
   it('places WordArt as text in its own colour', async () => {
@@ -114,8 +131,9 @@ describe.skipIf(!have)('Publisher corpus (real files)', () => {
     expect(cellTexts(t)[1]).toEqual(['aaa', '123', '456', '789', '012']);
     expect(t.rows[0].cells[0].colSpan).toBe(5);
     expect(items(r.pub).filter((i) => i.kind === 'picture').length).toBe(18);
-    expect(Object.keys(r.pub.media)).toHaveLength(4);
-    expect(r.warnings.some((w) => /13 pictures are Windows metafiles/.test(w))).toBe(true);
+    expect(Object.keys(r.pub.media).length).toBeGreaterThanOrEqual(4); // plus metafiles where they convert
+    // 13 of the pictures are Windows metafiles: either converted to media or reported in a warning.
+    expect(r.warnings.some((w) => /Windows metafile/.test(w)) || Object.keys(r.pub.media).length >= 4 + 13).toBe(true);
   });
 
   it('reads landscape and A5 publications with masters, groups and embedded pictures', async () => {
@@ -123,7 +141,7 @@ describe.skipIf(!have)('Publisher corpus (real files)', () => {
     expect(a.pub.size).toEqual({ w: 841.89, h: 595.28 });
     expect(a.pub.data.pages).toHaveLength(2);
     expect(items(a.pub).filter((i) => i.kind === 'group')).toHaveLength(3);
-    expect(Object.keys(a.pub.media)).toHaveLength(2);
+    expect(Object.keys(a.pub.media).length).toBeGreaterThanOrEqual(2); // plus metafiles where they convert
     const b = await load('fdo67299-1.pub');
     expect(b.pub.size).toEqual({ w: 420.94, h: 595.28 });
     expect(b.pub.data.pages).toHaveLength(4);

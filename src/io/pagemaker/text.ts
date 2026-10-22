@@ -17,6 +17,14 @@ export interface PmChar {
   /** Thousandths of an em. */
   kerning: number;
   superSubSize: number; subPos: number; superPos: number;
+  /** Horizontal scale in tenths of a percent (0xffff = normal width). */
+  hscale: number;
+  /** Track: 0 very loose … 4 very tight, 0x7f no track. */
+  track: number;
+  /** "No break": the run is kept on one line. */
+  noBreak: boolean;
+  /** Baseline shift in twentieths of a point, positive up. */
+  shift: number;
 }
 
 export interface PmRule { type: number; width: number; color: number; tint: number }
@@ -59,15 +67,22 @@ export function readTextBlock(file: PmFile, id: number): PmText {
       try {
         const r = recordAt(file, rec, i);
         const length = r.u16(), font = r.u16(), size = r.u16(), leading = r.u16();
+        // 0 length, 2 font, 4 size and 6 leading (tenths of a point), 8 colour, 10 style flags,
+        // 12 horizontal scale (tenths of a percent, 0xffff normal), 14 track (byte), 15 line-end flags
+        // (0x08 no break), 16 manual kerning (thousandths of an em), 18 small-caps size, 20 super/
+        // subscript size, 22 subscript and 24 superscript position (tenths of a percent), 26 baseline
+        // shift (twentieths of a point, positive up), 28 tint. Checked on a Mac PageMaker 6.0 file
+        // whose text names each attribute it carries.
         const color = r.u16();
         const f = r.u16();
-        r.skip(4);
+        const hscale = r.u16();
+        const track = r.u8(), lineFlags = r.u8();
         const kerning = r.i16();
         r.skip(2);
         const superSubSize = r.u16(), subPos = r.u16(), superPos = r.u16();
-        r.skip(2);
+        const shift = r.i16();
         const tint = r.u16();
-        chars.push({ length, font, size, leading, color, tint, kerning, superSubSize, subPos, superPos, bold: !!(f & 1), italic: !!(f & 2), underline: !!(f & 4), outline: !!(f & 8), shadow: !!(f & 0x10), strike: !!(f & 0x100), sup: !!(f & 0x200), sub: !!(f & 0x400), allCaps: !!(f & 0x800), smallCaps: !!(f & 0x1000) });
+        chars.push({ length, font, size, leading, color, tint, kerning, superSubSize, subPos, superPos, hscale, track, noBreak: !!(lineFlags & 0x08), shift, bold: !!(f & 1), italic: !!(f & 2), underline: !!(f & 4), outline: !!(f & 8), shadow: !!(f & 0x10), strike: !!(f & 0x100), sup: !!(f & 0x200), sub: !!(f & 0x400), allCaps: !!(f & 0x800), smallCaps: !!(f & 0x1000) });
       } catch { break; }
     }
   }
@@ -147,9 +162,20 @@ export function runProps(c: PmChar, env: TextEnv): RunProps {
   else if (c.sub) p.baseline = c.subPos ? -Math.round(c.subPos / 10) : -33;
   const color = env.colors[c.color];
   if (color && (color !== '#000000' || c.tint < 100)) p.color = tinted(color, c.tint);
-  if (c.kerning && size > 0) p.spc = r2((c.kerning / 1000) * size);
+  if (c.outline) p.outline = true;
+  if (c.shadow) p.tshadow = true;
+  if (c.hscale !== 0xffff && c.hscale > 0 && c.hscale !== 1000) p.hscale = r2(c.hscale / 10);
+  if (c.shift) p.shift = r2(c.shift / 20);
+  // Manual kerning plus the track. PageMaker's tracks are tables that depend on the type size; a
+  // fixed fraction of an em per track is a close stand-in at text sizes.
+  const trackEm = TRACK_EM[c.track] ?? 0;
+  const spc = (c.kerning / 1000 + trackEm) * (c.size / 10);
+  if (spc && size > 0) p.spc = r2(spc);
   return p;
 }
+
+/** Track index (0 very loose … 4 very tight) to added space per character, in ems. */
+const TRACK_EM: Record<number, number> = { 0: 0.075, 1: 0.04, 2: 0, 3: -0.025, 4: -0.05 };
 
 /** Automatic leading when a paragraph record does not say: PageMaker's default is 120% of the point size. */
 const AUTO_LEADING = 1.2;
@@ -177,9 +203,9 @@ export function paraProps(p: PmPara, env: TextEnv): ParaProps {
 export function textParagraphs(t: PmText, env: TextEnv, style = 'Body'): Paragraph[] {
   const text = decode(t.bytes, env.encoding);
   // Character runs as absolute spans.
-  const spans: { start: number; end: number; props: RunProps }[] = [];
+  const spans: { start: number; end: number; props: RunProps; noBreak?: boolean }[] = [];
   let pos = 0;
-  for (const c of t.chars) { spans.push({ start: pos, end: pos + c.length, props: runProps(c, env) }); pos += c.length; }
+  for (const c of t.chars) { spans.push({ start: pos, end: pos + c.length, props: runProps(c, env), noBreak: c.noBreak }); pos += c.length; }
   if (!spans.length) spans.push({ start: 0, end: text.length, props: {} });
   const out: Paragraph[] = [];
   const paraRanges: [number, number][] = [];
@@ -203,7 +229,9 @@ export function textParagraphs(t: PmText, env: TextEnv, style = 'Body'): Paragra
       const parts = piece.split(/[\r\n]/);
       parts.forEach((part, k) => {
         if (k > 0) runs.push({ text: '', br: true });
-        const clean = part.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
+        let clean = part.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
+        // "No break" keeps the run on one line: its spaces become no-break spaces.
+        if (sp.noBreak) clean = clean.replace(/ /g, '\u00a0');
         if (clean) runs.push({ text: clean, ...sp.props });
       });
     }

@@ -56,6 +56,70 @@ const SHAPE_MARKERS = new Set([0x0000, 0x0002, 0x0004, 0x0005, 0x0006, 0x0007, 0
  * The cell spans sit in a child chunk (marker 0x4f): a count at 0x0a and 11-byte entries from 0x14,
  * each a border style index, first row, last row, first column, last column, a flag and an inset.
  */
+/** A cell border style of a Publisher 2000 table: line width specifier and color for each side. */
+interface CellStyle2k { sides: { w: number; c: number }[] }
+
+/**
+ * The table's cell border styles (child chunk 0x4e): a count at 0x0a, the entry size (45) at 0x0e and
+ * the entries from 0x14. An entry is a mask word (0x40 top and left, 0x10 adds the right side, 0x20
+ * the bottom: Publisher draws each cell's top and left edges and only the last column's right and the
+ * last row's bottom edges), 17 bytes of cell settings (four margins of 0x39 twips among them), then
+ * four 6-byte side records for top, left, right and bottom (a pad byte, the line width specifier, a
+ * color reference as shapes use) and a use count. Width 0 is no line: a new Publisher 2000 table has
+ * only non-printing gridlines.
+ */
+function cellStyles2k(r: Reader, c: Chunk, chunks: Chunk[]): CellStyle2k[] | null {
+  const sc = chunks.find((k) => k.parent === c.seq && k.marker === 0x004e);
+  if (!sc) return null;
+  const size = r.u16At(sc.offset + 0x0e);
+  if (size < 45 || size > 200) return null;
+  const n = Math.min(r.u16At(sc.offset + 0x0a), Math.floor((sc.end - sc.offset - 0x14) / size));
+  const out: CellStyle2k[] = [];
+  for (let i = 0; i < n; i++) {
+    const e = sc.offset + 0x14 + i * size;
+    const mask = r.u16At(e);
+    const sides = [0, 1, 2, 3].map((k) => ({ w: r.u8At(e + 19 + k * 6 + 1), c: r.u32At(e + 19 + k * 6 + 2) }));
+    if (!(mask & 0x10)) sides[2].w = 0;
+    if (!(mask & 0x20)) sides[3].w = 0;
+    out.push({ sides });
+  }
+  return out;
+}
+
+/** The bordered cell edges of a Publisher 2000 table as line shapes (EMU, page-center coordinates). */
+function tableEdges2k(table: TableInfo, styleOf: number[], styles: CellStyle2k[], box: NonNullable<LShape['box']>, seq: number, palette: number[], names: Map<number, string>): LShape[] {
+  const xs = [box.xs], ys = [box.ys];
+  for (const w of table.colWidths) xs.push(xs[xs.length - 1] + w);
+  for (const h of table.rowHeights) ys.push(ys[ys.length - 1] + h);
+  // Segments keyed by line (orientation, position, width, color), merged where they touch.
+  const segs = new Map<string, [number, number][]>();
+  const add = (horiz: boolean, at: number, a: number, b: number, side: { w: number; c: number }) => {
+    if (!side.w) return;
+    const key = `${horiz ? 'h' : 'v'}|${at}|${side.w}|${side.c}`;
+    if (!segs.has(key)) segs.set(key, []);
+    segs.get(key)!.push([Math.min(a, b), Math.max(a, b)]);
+  };
+  table.cells.forEach((cell, i) => {
+    const st = styles[styleOf[i]];
+    if (!st) return;
+    const [top, left, right, bottom] = st.sides;
+    const x0 = xs[cell.c0], x1 = xs[cell.c1 + 1] ?? xs[xs.length - 1], y0 = ys[cell.r0], y1 = ys[cell.r1 + 1] ?? ys[ys.length - 1];
+    add(true, y0, x0, x1, top); add(false, x0, y0, y1, left); add(false, x1, y0, y1, right); add(true, y1, x0, x1, bottom);
+  });
+  const out: LShape[] = [];
+  for (const [key, list] of segs) {
+    const [o, atS, wS, cS] = key.split('|');
+    const at = Number(atS), side = { w: Number(wS), c: Number(cS) };
+    list.sort((p, q) => p[0] - q[0]);
+    const merged: [number, number][] = [];
+    for (const sg of list) { const last = merged[merged.length - 1]; if (last && sg[0] <= last[1] + 1) last[1] = Math.max(last[1], sg[1]); else merged.push([...sg]); }
+    for (const [a, b] of merged) {
+      out.push({ seq, kind: 'shape', type: 20, box: o === 'h' ? { xs: a, ys: at, xe: b, ye: at } : { xs: at, ys: a, xe: at, ye: b }, line: { color: colorOf(colorRef2k(side.c), palette, names), width: Math.max(0.25, lineWidth2k(side.w)) } } as LShape);
+    }
+  }
+  return out;
+}
+
 function table2k(r: Reader, c: Chunk, chunks: Chunk[]): TableInfo | null {
   const o = c.offset;
   const cols = r.u16At(o + 0x50), total = r.u16At(o + 0x74);
@@ -64,16 +128,19 @@ function table2k(r: Reader, c: Chunk, chunks: Chunk[]): TableInfo | null {
   const colWidths: number[] = [], rowHeights: number[] = [];
   for (let i = 0; i < total; i++) { const size = r.u32At(o + 0x7e + i * 8 + 4); (i < cols ? colWidths : rowHeights).push(size); }
   const cells: TableInfo['cells'] = [];
+  const styleIndex: number[] = [];
   const cc = chunks.find((k) => k.parent === c.seq && k.marker === 0x004f);
   if (cc) {
     const n = Math.min(r.u16At(cc.offset + 0x0a), Math.floor((cc.end - cc.offset - 0x14) / 11));
     for (let i = 0; i < n; i++) {
       const e = cc.offset + 0x14 + i * 11;
       const r0 = r.u8At(e + 2), r1 = r.u8At(e + 3), c0 = r.u8At(e + 4), c1 = r.u8At(e + 5);
-      if (r0 < rows && c0 < cols) cells.push({ r0, r1: Math.min(Math.max(r1, r0), rows - 1), c0, c1: Math.min(Math.max(c1, c0), cols - 1) });
+      if (r0 < rows && c0 < cols) { cells.push({ r0, r1: Math.min(Math.max(r1, r0), rows - 1), c0, c1: Math.min(Math.max(c1, c0), cols - 1) }); styleIndex.push(r.u16At(e)); }
     }
   }
-  return { rows, cols, rowHeights, colWidths, cells };
+  const t: TableInfo & { styleIndex?: number[] } = { rows, cols, rowHeights, colWidths, cells };
+  Object.defineProperty(t, 'styleIndex', { value: styleIndex, enumerable: false });
+  return t;
 }
 
 function readChunks(r: Reader): Chunk[] {
@@ -96,13 +163,16 @@ function shapeOf(r: Reader, c: Chunk, chunks: Chunk[], palette: number[], names:
   const o = c.offset, sh = L.shift;
   const s: LShape = { seq: c.seq, kind: c.marker === 0x000f ? 'group' : 'shape', type: 1 };
   let flagsOffset = 0, isRect = false, isLine = false, isImage = false;
+  let tableStyles: CellStyle2k[] | null = null;
   switch (c.marker) {
     case 0x000f: break;
     case 0x000a: {
       if (L.textMarker !== 0x0008) break;
       const t = table2k(r, c, chunks);
       if (!t) break;
-      s.kind = 'table'; s.table = t; s.textId = r.u16At(o + 0x4e); s.defaultTableBorder = true; isRect = true;
+      s.kind = 'table'; s.table = t; s.textId = r.u16At(o + 0x4e); isRect = true;
+      tableStyles = cellStyles2k(r, c, chunks);
+      if (!tableStyles) s.defaultTableBorder = true;
       break;
     }
     case 0x0004: isLine = true; flagsOffset = 0x41; s.type = 20; break;
@@ -142,6 +212,14 @@ function shapeOf(r: Reader, c: Chunk, chunks: Chunk[], palette: number[], names:
   const side = sides.find((x) => x.w !== 0);
   if (side) s.line = { color: colorOf(colorRef2k(side.c), palette, names), width: Math.max(0.25, lineWidth2k(side.w)) };
   s.insets = [emuPt(36576), emuPt(36576), emuPt(36576), emuPt(36576)];
+  if (s.kind === 'table' && s.table && tableStyles && s.box) {
+    // The table's own record carries no outline of its own here; its cell borders are drawn as lines
+    // grouped with it (the table item has one outer and one inner border style, not per-edge ones).
+    delete s.line;
+    const styleOf = (s.table as TableInfo & { styleIndex?: number[] }).styleIndex || [];
+    const edges = s.rot ? [] : tableEdges2k(s.table, styleOf, tableStyles, s.box, s.seq, palette, names);
+    if (edges.length) return { seq: s.seq, kind: 'group', type: 1, box: { ...s.box }, children: [s, ...edges] } as LShape;
+  }
   return s;
 }
 

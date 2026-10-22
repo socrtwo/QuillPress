@@ -178,7 +178,16 @@ export function parseEscher(escher: Uint8Array): EscherInfo {
 // ------------------------------------------------------------------------------------------
 // Pictures
 
-export interface DelayPicture { mime: string; data: Uint8Array; kind: 'png' | 'jpeg' | 'dib' | 'tiff' | 'wmf' | 'emf' | 'pict' | 'unknown' }
+export interface DelayPicture {
+  mime: string;
+  data: Uint8Array;
+  kind: 'png' | 'jpeg' | 'dib' | 'tiff' | 'wmf' | 'emf' | 'pict' | 'unknown';
+  /**
+   * Metafile BLIPs: whether `data` is deflated (the zlib header already skipped), the picture's
+   * logical bounds and its size in points, from the BLIP's metafile header.
+   */
+  meta?: { compressed: boolean; bounds: { left: number; top: number; right: number; bottom: number }; sizePt: { w: number; h: number } };
+}
 
 const BLIP: Record<number, { kind: DelayPicture['kind']; mime: string; offset: number; oneUid: number[] }> = {
   0xf01e: { kind: 'png', mime: 'image/png', offset: 0x11, oneUid: [0x6e0] },
@@ -214,6 +223,25 @@ export function parseDelayStream(delay: Uint8Array): DelayPicture[] {
     const def = BLIP[rec.type];
     if (!def) { out.push({ kind: 'unknown', mime: 'application/octet-stream', data: new Uint8Array(0) }); r.seek(rec.end); continue; }
     const start = rec.start + def.offset + (def.oneUid.includes(rec.inst) ? 0 : 0x10);
+    if (def.kind === 'wmf' || def.kind === 'emf' || def.kind === 'pict') {
+      // UIDs, then the metafile header: uncompressed size, bounds (4 × int32), size in EMU (2 × int32),
+      // saved size, compression (0 deflate, 0xFE none) and filter; the zlib stream's 2-byte header is
+      // skipped so `data` is raw deflate when compressed.
+      const h = start - 0x34 + 0x10;
+      const dv = new DataView(delay.buffer, delay.byteOffset, delay.byteLength);
+      const ok = h + 34 <= rec.end;
+      const i = (o: number) => (ok ? dv.getInt32(h + o, true) : 0);
+      const compressed = ok ? delay[h + 32] === 0 : true;
+      const saved = ok ? dv.getUint32(h + 28, true) : 0;
+      const from = compressed ? start : start - 2;
+      const to = saved ? Math.min(rec.end, h + 34 + saved) : rec.end;
+      out.push({
+        kind: def.kind, mime: def.mime, data: delay.slice(Math.min(from, rec.end), to),
+        meta: ok ? { compressed, bounds: { left: i(4), top: i(8), right: i(12), bottom: i(16) }, sizePt: { w: i(20) / 12700, h: i(24) / 12700 } } : undefined,
+      });
+      r.seek(rec.end);
+      continue;
+    }
     let data: Uint8Array = delay.slice(Math.min(start, rec.end), rec.end);
     if (def.kind === 'dib' && data.length >= 0x2e + 4) data = dibToBmp(data);
     out.push({ kind: def.kind, mime: def.mime, data });

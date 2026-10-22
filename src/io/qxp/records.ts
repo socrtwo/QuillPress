@@ -18,8 +18,12 @@ export interface CharFormat {
   superscript: boolean; subscript: boolean; superior: boolean; strike: boolean; allCaps: boolean; smallCaps: boolean;
   /** '#rrggbb' after the shade is applied. */
   color: string;
-  /** Points; positive raises. */
+  /** Fraction of the type size; positive raises (QuarkXPress shows it in points at the run's size). */
   baselineShift: number;
+  /** Horizontal scale, 1 = 100 %. */
+  hscale: number;
+  /** Tracking plus manual kerning after each character, in 1/200 em. */
+  track: number;
   /** The span holds control characters (not shown). */
   control: boolean;
 }
@@ -273,16 +277,21 @@ export class QxpTables {
     const fontIndex = r.i16();
     const flags = r.u16();
     const size = r.fraction();
-    r.skip(4);
+    const hscale = r.fraction();
     const colorId = this.v4 ? r.u16() : r.u8();
     r.skip(this.v4 ? 2 : 1);
     const shade = r.fraction();
-    r.skip(8);
+    // After the shade: 2 bytes unused in the samples, manual kerning (signed, 1/200 em, stored on the
+    // first character of a kerned pair), tracking (fixed point, 1/200 em), then the baseline shift.
+    r.skip(2);
+    const kern = r.i16();
+    const tracking = r.fraction();
     const baselineShift = r.fraction();
     const control = r.u8() !== 0;
     r.skip(this.v4 ? 23 : 13);
     return {
       font: this.font(fontIndex), size, color: this.color(colorId, shade), baselineShift, control,
+      hscale: hscale > 0.05 && hscale < 10 ? hscale : 1, track: Math.abs(kern + tracking) < 1000 ? kern + tracking : 0,
       bold: !!(flags & 0x1), italic: !!(flags & 0x2), underline: !!(flags & 0x4), outline: !!(flags & 0x8), shadow: !!(flags & 0x10),
       superscript: !!(flags & 0x20), subscript: !!(flags & 0x40), superior: !!(flags & 0x100), strike: !!(flags & 0x200),
       allCaps: !!(flags & 0x400), smallCaps: !!(flags & 0x800), wordUnderline: !!(flags & 0x1000),

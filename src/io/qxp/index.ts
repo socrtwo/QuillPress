@@ -45,7 +45,7 @@ interface TextRef {
 
 interface Ctx {
   pub: Pub; header: QxpHeader; tables: QxpTables; bytes: Uint8Array; warnings: string[];
-  refs: TextRef[]; counts: Record<string, number>; previews: number; missingPictures: number; customText: number; customPictures: number; shiftedRuns: number;
+  refs: TextRef[]; counts: Record<string, number>; previews: number; missingPictures: number; customText: number; customPictures: number;
 }
 
 async function readLayout(bytes: Uint8Array, name: string, header: QxpHeader): Promise<LegacyImport> {
@@ -64,7 +64,7 @@ async function readLayout(bytes: Uint8Array, name: string, header: QxpHeader): P
   const facing = docPages.some((p) => p.offsets.length === 2);
   const pub = Pub.blank(size, { facing, pages: 0 });
   pub.data.props.title = name.replace(/\.[^.]+$/, '');
-  const ctx: Ctx = { pub, header, tables, bytes, warnings, refs: [], counts: {}, previews: 0, missingPictures: 0, customText: 0, customPictures: 0, shiftedRuns: 0 };
+  const ctx: Ctx = { pub, header, tables, bytes, warnings, refs: [], counts: {}, previews: 0, missingPictures: 0, customText: 0, customPictures: 0 };
   const master = pub.data.masters[0];
 
   for (const qp of docPages) {
@@ -142,7 +142,7 @@ async function toItem(ctx: Ctx, o: QxpObject, off: Rect): Promise<Item | null> {
   // QuarkXPress draws a box's frame inside its bounds (QuillPress strokes on the outline), so a framed
   // box is drawn half a frame width smaller and its text inset by the rest of the frame.
   const half = !isLineShape && o.content !== 'objects' && line?.width ? Math.min(line.width / 2, w / 2, h / 2) : 0;
-  const base = { x: r2(x + half), y: r2(y + half), w: r2(w - 2 * half), h: r2(h - 2 * half), ...(o.rotation ? { rot: r2(-o.rotation) } : {}), ...(o.hflip ? { flipH: true } : {}), ...(o.vflip ? { flipV: true } : {}) };
+  const base = { x: r2(x + half), y: r2(y + half), w: r2(w - 2 * half), h: r2(h - 2 * half), ...(o.rotation ? { rot: r2(-o.rotation) } : {}), ...(o.skew ? { skew: r2(o.skew) } : {}), ...(o.hflip ? { flipH: true } : {}), ...(o.vflip ? { flipV: true } : {}) };
   const wrap = o.runaround ? { wrap: { mode: 'square' as const, offset: 0 } } : {};
   const count = (k: string) => { ctx.counts[k] = (ctx.counts[k] || 0) + 1; };
   const isLine = o.shape === 'line' || o.shape === 'orthoLine' || o.shape === 'bezierLine';
@@ -240,7 +240,6 @@ function ownText(ctx: Ctx, o: QxpObject): QxpText | undefined {
   if (l.contentIndex < 4 || l.offsetIntoText !== 0) return undefined;
   try {
     const t = readStory(ctx.bytes, l.contentIndex, ctx.header, ctx.tables);
-    ctx.shiftedRuns += t.chars.filter((c) => c.format && c.format.baselineShift && !c.format.superscript && !c.format.subscript && !c.format.superior && !c.format.control).length;
     return t;
   } catch (e) {
     ctx.warnings.push(`The text of a box could not be read (${(e as Error).message}).`);
@@ -457,7 +456,6 @@ function summarize(ctx: Ctx, name: string, pageCounts: Record<string, number>): 
   const masters = c.masters ? ` ${c.masters} master page${c.masters === 1 ? '' : 's'} with objects ${c.masters === 1 ? 'was' : 'were'} imported as masters but not applied, because QuarkXPress keeps copies of master items on the pages; apply one from the Pages pane if a page lacks them.` : '';
   ctx.warnings.unshift(`${ctx.header.label} document "${name}": ${pages} page${pages === 1 ? '' : 's'} read with ${parts.length ? parts.join(', ') : 'no objects'}.${masters}`);
   if (ctx.missingPictures) ctx.warnings.push(`${ctx.missingPictures} picture box${ctx.missingPictures === 1 ? ' is' : 'es are'} empty: QuarkXPress links pictures instead of embedding them${ctx.previews ? ` (${ctx.previews} had a usable preview in the file)` : ''}. Place the original picture files again.`);
-  if (ctx.shiftedRuns) ctx.warnings.push(`${ctx.shiftedRuns} text run${ctx.shiftedRuns === 1 ? ' has' : 's have'} a baseline shift, which was not kept (QuillPress raises or lowers text only as superscript or subscript).`);
   if (ctx.customPictures) ctx.warnings.push(`${ctx.customPictures} picture box${ctx.customPictures === 1 ? ' has' : 'es have'} a Bézier or polygon outline: the outline is drawn as a shape grouped with the picture frame, and a placed picture is not clipped to it.`);
   if (ctx.customText) ctx.warnings.push(`${ctx.customText} text box${ctx.customText === 1 ? ' has' : 'es have'} a Bézier or polygon outline: the outline is drawn as a shape grouped with the text frame, and the text is set in the box's rectangle.`);
 }
