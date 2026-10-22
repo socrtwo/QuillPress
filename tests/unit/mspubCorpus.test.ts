@@ -148,4 +148,23 @@ describe.skipIf(!have)('Publisher corpus (real files)', () => {
       expect(r.pub.data.pages.length).toBeGreaterThan(0);
     }
   });
+
+  it('follows the reference reading of lists, line spacing and special pages (checked against LibreOffice)', async () => {
+    // Numbering type 0xFF switches the list off: the newsletter's sidebar is not a numbered list.
+    const n = await load('923566.pub');
+    const side = n.pub.data.stories.find((s) => s.paras.some((p) => p.runs.some((r) => r.text === 'EXCESS')))!;
+    expect(side.paras.every((p) => !p.bullet)).toBe(true);
+    // Symbol-font round bullets become U+2022; numbered lists keep their schemes.
+    const t = await load('REG-TXT1-pub2010.pub');
+    const bullets = t.pub.data.stories.flatMap((s) => s.paras).map((p) => p.bullet).filter(Boolean);
+    expect(bullets).toContainEqual({ kind: 'char', char: '\u2022' });
+    expect(bullets.filter((b) => b!.kind === 'num')).toHaveLength(3);
+    // "1.5 sp" is one and a half single lines (120 percent of the size each), not 150 percent of the size.
+    const b = await load('fdo68259-1.pub');
+    const head = b.pub.data.stories.find((s) => s.paras[0]?.runs[0]?.text === 'Titre de paragraphe')!;
+    expect(head.paras[1].lineSpacing).toBe(180);
+    // Pages listed after the scratch area are Publisher's special pages: LibreOffice's page counts.
+    const counts: Record<string, number> = { 'tables.pub': 1, 'table-merged.pub': 1, 'fdo64631-2.pub': 1, 'fdo68259-3.pub': 1, 'fdo68259-2.pub': 4, 'fdo60556-1.pub': 4 };
+    for (const [f, c] of Object.entries(counts)) expect((await load(f)).pub.data.pages, f).toHaveLength(c);
+  });
 });
