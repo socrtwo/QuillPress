@@ -1,6 +1,6 @@
 # Architecture plan
 
-- **Stack:** TypeScript, Vite, Capacitor, Electron; same CI and release workflows as QuillStage.
+- **Stack:** TypeScript, Vite, Capacitor, Electron; same CI and release workflows as Anne's Stage.
 - **Shell:** shared command registry, Quick Access Bar, customizable tabs and keyboard, command search, macro recorder, AI wizard and providers.
 - **Document model:** a lossless PDF object graph with page tree, annotations, form fields, outline, attachments, layer and metadata models.
 - **Viewing:** fast renderer, selectable text layer, page cache, search index, comparison mode, accessibility tree.
