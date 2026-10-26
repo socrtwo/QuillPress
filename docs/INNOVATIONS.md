@@ -1,6 +1,6 @@
 # Innovations survey
 
-Ideas QuillFolio plans to adopt, described generically.
+Ideas Anne's Folio plans to adopt, described generically.
 
 | Origin | Ideas adopted |
 |---|---|
